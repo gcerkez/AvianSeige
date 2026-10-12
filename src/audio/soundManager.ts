@@ -136,6 +136,17 @@ class SoundManager {
         osc.stop(t + 0.35);
         break;
       }
+      case 'harrier': {
+        // High-speed jet swoosh & flechette launch
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(840, t);
+        osc.frequency.exponentialRampToValueAtTime(280, t + 0.1);
+        gain.gain.setValueAtTime(0.22, t);
+        gain.gain.exponentialRampToValueAtTime(0.01, t + 0.1);
+        osc.start(t);
+        osc.stop(t + 0.1);
+        break;
+      }
     }
   }
 
@@ -331,6 +342,18 @@ class SoundManager {
         gain.gain.exponentialRampToValueAtTime(0.01, t + 0.7);
         osc.start(t);
         osc.stop(t + 0.7);
+        break;
+      }
+      case 'harrier': {
+        // Jet afterburner roar with supersonic sonic boom
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(600, t);
+        osc.frequency.linearRampToValueAtTime(1200, t + 0.2);
+        osc.frequency.exponentialRampToValueAtTime(80, t + 0.6);
+        gain.gain.setValueAtTime(0.5, t);
+        gain.gain.exponentialRampToValueAtTime(0.01, t + 0.6);
+        osc.start(t);
+        osc.stop(t + 0.6);
         break;
       }
     }

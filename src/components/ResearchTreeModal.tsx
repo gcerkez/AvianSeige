@@ -1,18 +1,20 @@
 import React from 'react';
 import { RESEARCH_NODES } from '../data/research';
-import { Nut, Sparkles, Check, Lock, Wind, Flame, Hammer, Coins, Shield } from 'lucide-react';
+import { Nut, Sparkles, Check, Lock, Wind, Flame, Hammer, Coins, Shield, Award } from 'lucide-react';
 import { soundManager } from '../audio/soundManager';
 
 interface ResearchTreeModalProps {
   acorns: number;
   shards: number;
+  advancedTokens?: number;
   purchasedResearch: string[];
-  onUnlockResearch: (nodeId: string, acornCost: number, shardCost: number) => void;
+  onUnlockResearch: (nodeId: string, acornCost: number, shardCost: number, advancedTokenCost?: number) => void;
 }
 
 export const ResearchTreeModal: React.FC<ResearchTreeModalProps> = ({
   acorns,
   shards,
+  advancedTokens = 0,
   purchasedResearch,
   onUnlockResearch,
 }) => {
@@ -30,10 +32,10 @@ export const ResearchTreeModal: React.FC<ResearchTreeModalProps> = ({
         <div>
           <h1 className="text-2xl font-bold tracking-tight text-amber-400">Research & Technology</h1>
           <p className="text-sm text-stone-400 mt-1">
-            Invest Acorns and Elemental Shards into permanent strategic advantages.
+            Invest Acorns, Elemental Shards, and Daily Mission Astral Tokens into permanent strategic advantages.
           </p>
         </div>
-        <div className="flex items-center gap-3 text-xs font-mono">
+        <div className="flex flex-wrap items-center gap-3 text-xs font-mono">
           <div className="flex items-center gap-1.5 px-3 py-1.5 bg-stone-900 border border-stone-800 rounded-lg text-emerald-400">
             <Nut className="w-4 h-4 text-emerald-500" />
             <span>Acorns: {acorns}</span>
@@ -41,6 +43,10 @@ export const ResearchTreeModal: React.FC<ResearchTreeModalProps> = ({
           <div className="flex items-center gap-1.5 px-3 py-1.5 bg-stone-900 border border-stone-800 rounded-lg text-sky-400">
             <Sparkles className="w-4 h-4 text-sky-400" />
             <span>Shards: {shards}</span>
+          </div>
+          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-purple-950/60 border border-purple-800/80 rounded-lg text-purple-300">
+            <Award className="w-4 h-4 text-purple-400" />
+            <span>Astral Tokens: {advancedTokens}</span>
           </div>
         </div>
       </div>
@@ -63,7 +69,11 @@ export const ResearchTreeModal: React.FC<ResearchTreeModalProps> = ({
                 {nodes.map((node) => {
                   const isUnlocked = purchasedResearch.includes(node.id);
                   const prereqsMet = node.prerequisites.every((p) => purchasedResearch.includes(p));
-                  const canAfford = acorns >= node.acornCost && shards >= node.shardCost;
+                  const advCost = node.advancedTokenCost || 0;
+                  const canAfford =
+                    acorns >= node.acornCost &&
+                    shards >= node.shardCost &&
+                    advancedTokens >= advCost;
 
                   return (
                     <div
@@ -79,6 +89,11 @@ export const ResearchTreeModal: React.FC<ResearchTreeModalProps> = ({
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
                           <span className="font-bold text-xs text-stone-100">{node.name}</span>
+                          {node.advancedTokenCost ? (
+                            <span className="text-[10px] bg-purple-950 border border-purple-800 text-purple-300 px-1.5 py-0.5 rounded font-bold">
+                              ADVANCED
+                            </span>
+                          ) : null}
                           {isUnlocked && (
                             <span className="text-[10px] text-emerald-400 flex items-center gap-1 font-semibold">
                               <Check className="w-3 h-3" /> Unlocked
@@ -102,7 +117,7 @@ export const ResearchTreeModal: React.FC<ResearchTreeModalProps> = ({
                             disabled={!prereqsMet || !canAfford}
                             onClick={() => {
                               soundManager.playUpgrade();
-                              onUnlockResearch(node.id, node.acornCost, node.shardCost);
+                              onUnlockResearch(node.id, node.acornCost, node.shardCost, node.advancedTokenCost);
                             }}
                             className={`py-1.5 px-3 rounded text-xs font-semibold flex items-center gap-1.5 transition-colors ${
                               prereqsMet && canAfford
@@ -112,7 +127,7 @@ export const ResearchTreeModal: React.FC<ResearchTreeModalProps> = ({
                           >
                             <span>Research</span>
                             <span className="font-mono text-[11px]">
-                              ({node.acornCost}A{node.shardCost > 0 ? ` + ${node.shardCost}S` : ''})
+                              ({node.acornCost}A{node.shardCost > 0 ? ` + ${node.shardCost}S` : ''}{node.advancedTokenCost ? ` + ${node.advancedTokenCost}T` : ''})
                             </span>
                           </button>
                         </div>

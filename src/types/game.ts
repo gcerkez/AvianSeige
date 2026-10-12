@@ -32,7 +32,8 @@ export type TowerTypeId =
   | 'woodpecker'
   | 'penguin'
   | 'phoenix'
-  | 'bomb_bird';
+  | 'bomb_bird'
+  | 'harrier';
 
 export type DifficultyPreset =
   | 'super_easy'
@@ -82,6 +83,8 @@ export interface TowerDefinition {
   projectileRadius: number;
   silhouetteColor: string;
   accentColor: string;
+  isFlying?: boolean;
+  flightSpeed?: number;
   paths: {
     path_a: UpgradePath;
     path_b: UpgradePath;
@@ -114,6 +117,17 @@ export interface PlacedTower {
   lastDamagedTime: number;
   isDestroyed?: boolean;
   lastAbilityTriggered?: number;
+  // Aerial / Flight Patrol
+  isFlying?: boolean;
+  flightPath?: { x: number; y: number }[];
+  flightPathProgress?: number;
+  flightSpeed?: number;
+  // Deliberate Combo Links
+  linkedComboTowerId?: string | null;
+  comboPartnerIds?: string[];
+  // Pre-upgraded loadout tracker
+  isPreUpgraded?: boolean;
+  loadoutId?: string;
 }
 
 export interface Projectile {
@@ -321,16 +335,72 @@ export interface TacticalPowerUp {
   iconName: string;
 }
 
+export interface RewardedTowerLoadout {
+  id: string;
+  typeId: TowerTypeId;
+  name: string;
+  title: string;
+  tierLabel: 'Common Loadout' | 'Veteran Loadout' | 'Elite Loadout' | 'Apex Loadout';
+  tiers: {
+    path_a: number;
+    path_b: number;
+    path_c: number;
+  };
+  lockedPath: 'path_a' | 'path_b' | 'path_c' | null;
+  earnedFrom: string;
+  earnedAt: number;
+  isNew: boolean;
+  bonusStatsDescription?: string;
+}
+
+export type DailyMissionType =
+  | 'defeat_enemies'
+  | 'survive_waves'
+  | 'trigger_combos'
+  | 'destroy_structures'
+  | 'deploy_flying'
+  | 'complete_level';
+
+export interface DailyMission {
+  id: string;
+  title: string;
+  description: string;
+  targetType: DailyMissionType;
+  enemyArchetype?: EnemyArchetype;
+  targetCount: number;
+  currentCount: number;
+  completed: boolean;
+  claimed: boolean;
+  rewardAcorns: number;
+  rewardAdvancedTokens: number;
+}
+
 export interface PlayerProgression {
   feathers: number;
   acorns: number;
   shards: number;
   tokens: number;
+  advancedTokens?: number; // Advanced permanent research currency earned via daily missions & milestones
   unlockedTowers: TowerTypeId[];
   completedLevels: Record<string, { stars: number; highestDifficulty: DifficultyPreset }>;
   researchPurchased: string[];
   ownedSkins: string[];
   equippedSkins: Record<TowerTypeId, string>;
+  rewardedTowers?: RewardedTowerLoadout[];
+  claimedMilestones?: Record<string, boolean>;
+  dailyMissionsDate?: string;
+  dailyMissions?: DailyMission[];
+}
+
+export interface SaveSlotData {
+  id: string;
+  name: string;
+  version: number;
+  lastPlayed: number;
+  createdAt: number;
+  highestWaveReached: number;
+  progression: PlayerProgression;
+  settings: GameSettings;
 }
 
 export interface GameSettings {

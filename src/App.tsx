@@ -13,6 +13,8 @@ import {
   FormationAbility,
   ProximitySynergy,
   CollapseCrater,
+  RewardedTowerLoadout,
+  SaveSlotData,
 } from './types/game';
 import { CAMPAIGN_LEVELS } from './data/levels';
 import { TOWERS_DATA } from './data/towers';
@@ -23,8 +25,7 @@ import { physicsEngine } from './physics/engine';
 import { soundManager } from './audio/soundManager';
 import { TopNav } from './components/TopNav';
 import { GameCanvas, isPlacementValid } from './components/GameCanvas';
-import { TowerPlaceBar } from './components/TowerPlaceBar';
-import { TowerUpgradePanel } from './components/TowerUpgradePanel';
+import { ModernTowerDrawer } from './components/ModernTowerDrawer';
 import { FormationSynergyBar } from './components/FormationSynergyBar';
 import { PowerUpBar, PowerUpState } from './components/PowerUpBar';
 import { CampaignMap } from './components/CampaignMap';
@@ -33,9 +34,29 @@ import { ResearchTreeModal } from './components/ResearchTreeModal';
 import { ChallengeModal } from './components/ChallengeModal';
 import { SettingsModal } from './components/SettingsModal';
 import { LevelVictoryModal } from './components/LevelVictoryModal';
+import { SaveManagerModal } from './components/SaveManagerModal';
+import { DailyMissionsModal } from './components/DailyMissionsModal';
+import { RewardClaimModal } from './components/RewardClaimModal';
 import { Play, Pause, FastForward, RotateCcw, Heart, Feather, ShieldAlert, Flame, Zap } from 'lucide-react';
 
-const STORAGE_KEY = 'avian_siege_save_v1';
+import { computeEffectiveTowerStats } from './utils/towerStats';
+import { calculateWaveHealthMultiplier, DIFFICULTY_CONFIGS, TOWER_BASE_HEALTH } from './data/balance';
+import { advanceFlightPath, createDefaultFlightPath } from './utils/flightPath';
+import { generateTowerReward } from './utils/rewardGenerator';
+import {
+  getActiveSaveSlot,
+  setActiveSaveSlotId,
+  getAllSaveSlots,
+  saveSlot,
+  deleteSaveSlot,
+  renameSaveSlot,
+  overwriteSaveSlot,
+} from './utils/saveManager';
+import {
+  getOrGenerateDailyMissions,
+  updateDailyMissionProgress,
+  claimDailyMissionReward,
+} from './utils/dailyMissions';
 
 export default function App() {
   // Navigation Tabs
@@ -44,39 +65,32 @@ export default function App() {
   >('battle');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
+  // Multi-slot Save System
+  const [activeSlotId, setActiveSlotIdState] = useState<string>(() => getActiveSaveSlot().id);
+  const [allSlots, setAllSlots] = useState<SaveSlotData[]>(() => getAllSaveSlots());
+  const [isSaveManagerOpen, setIsSaveManagerOpen] = useState(false);
+
+  // Daily Missions Modal
+  const [isDailyMissionsOpen, setIsDailyMissionsOpen] = useState(false);
+
+  // Milestone Tower Reward Modal
+  const [pendingRewardClaim, setPendingRewardClaim] = useState<RewardedTowerLoadout | null>(null);
+
+  // Aerial Patrol Path Editing Mode
+  const [isEditingFlightPath, setIsEditingFlightPath] = useState(false);
+
+  // Pre-upgraded Loadout Placement Selection
+  const [selectedPreUpgradedLoadout, setSelectedPreUpgradedLoadout] =
+    useState<RewardedTowerLoadout | null>(null);
+
   // Global Persistent Progression
   const [progression, setProgression] = useState<PlayerProgression>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (!parsed.unlockedTowers?.includes('bomb_bird')) {
-          parsed.unlockedTowers = [...(parsed.unlockedTowers || []), 'bomb_bird'];
-        }
-        return parsed;
-      }
-    } catch {
-      // fallback
+    const slot = getActiveSaveSlot();
+    const p = slot.progression;
+    if (!p.unlockedTowers?.includes('harrier')) {
+      p.unlockedTowers = [...(p.unlockedTowers || []), 'harrier'];
     }
-    return {
-      feathers: 800,
-      acorns: 60,
-      shards: 15,
-      tokens: 30,
-      unlockedTowers: ['cardinal', 'owl', 'falcon', 'woodpecker', 'penguin', 'phoenix', 'bomb_bird'],
-      completedLevels: {},
-      researchPurchased: [],
-      ownedSkins: ['skin_cardinal_classic', 'skin_owl_classic', 'skin_falcon_classic'],
-      equippedSkins: {
-        cardinal: 'skin_cardinal_classic',
-        owl: 'skin_owl_classic',
-        falcon: 'skin_falcon_classic',
-        woodpecker: 'skin_woodpecker_classic',
-        penguin: 'skin_penguin_classic',
-        phoenix: 'skin_phoenix_classic',
-        bomb_bird: 'skin_bomb_bird_classic',
-      },
-    };
+    return p;
   });
 
   // Settings
@@ -212,14 +226,37 @@ export default function App() {
     },
   ]);
 
-  // Save progression changes
+  // Save progression changes to active slot
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(progression));
-    } catch {
-      // ignore
+    const cur = getActiveSaveSlot();
+    saveSlot({
+      ...cur,
+      id: activeSlotId,
+      progression,
+      settings,
+      highestWaveReached: Math.max(currentWaveIndex + 1, cur.highestWaveReached),
+    });
+    setAllSlots(getAllSaveSlots());
+  }, [progression, activeSlotId, currentWaveIndex]);
+
+  // Daily missions date check & initialization
+  useEffect(() => {
+    const { date, missions } = getOrGenerateDailyMissions(
+      progression.dailyMissionsDate,
+      progression.dailyMissions
+    );
+    if (
+      progression.dailyMissionsDate !== date ||
+      !progression.dailyMissions ||
+      progression.dailyMissions.length === 0
+    ) {
+      setProgression((p) => ({
+        ...p,
+        dailyMissionsDate: date,
+        dailyMissions: missions,
+      }));
     }
-  }, [progression]);
+  }, []);
 
   // Load level fresh & completely clear pending wave timers
   const initLevel = useCallback((lvl: LevelDefinition, endless = false) => {
@@ -284,26 +321,20 @@ export default function App() {
           const enemyStats = ENEMIES_DATA[group.type];
           if (!enemyStats) return;
 
-          let diffMultiplier = 1.0;
-          if (settings.difficulty === 'super_easy') diffMultiplier = 0.65;
-          else if (settings.difficulty === 'easy') diffMultiplier = 0.85;
-          else if (settings.difficulty === 'hard') diffMultiplier = 1.35;
-          else if (settings.difficulty === 'very_hard') diffMultiplier = 1.7;
-          else if (settings.difficulty === 'nightmare') diffMultiplier = 2.2;
+          const healthScale = calculateWaveHealthMultiplier(waveNumber, settings.difficulty);
+          const diffConfig = DIFFICULTY_CONFIGS[settings.difficulty] || DIFFICULTY_CONFIGS.normal;
 
-          // Progressive wave health curve matching BTD6 ramping
-          let waveHealthScale = 1.0;
-          if (waveNumber <= 40) {
-            waveHealthScale = 1.0 + (waveNumber - 1) * 0.08 + Math.pow((waveNumber - 1) / 10, 1.5) * 0.14;
-          } else {
-            const endlessWave = waveNumber - 40;
-            waveHealthScale = 4.2 * (Math.pow(1.045, endlessWave) + endlessWave * 0.2);
-          }
-
-          const finalHealth = Math.round(enemyStats.health * diffMultiplier * waveHealthScale);
-          const finalArmor = Math.round(enemyStats.armor * (1 + (waveNumber - 1) * 0.02));
-          const finalShield = Math.round(enemyStats.shieldFrontal * diffMultiplier * (1 + (waveNumber - 1) * 0.05));
-          const finalSpeed = Math.min(130, enemyStats.speed * (1 + Math.min(0.35, (waveNumber - 1) * 0.0025)));
+          const finalHealth = Math.round(enemyStats.health * healthScale);
+          const finalArmor = Math.round(
+            enemyStats.armor * (1 + Math.min(0.5, (waveNumber - 1) * 0.015))
+          );
+          const finalShield = Math.round(
+            enemyStats.shieldFrontal * diffConfig.multiplier * (1 + Math.min(0.8, (waveNumber - 1) * 0.02))
+          );
+          const finalSpeed = Math.min(
+            130,
+            enemyStats.speed * (1 + Math.min(0.25, (waveNumber - 1) * 0.002))
+          );
 
           const startPt = currentLevel.pathWaypoints[0];
           const newEnemy: Enemy = {
@@ -382,6 +413,24 @@ export default function App() {
         const currentStructures = structuresRef.current;
         const currentTowers = placedTowersRef.current;
         const currentLevel = currentLevelRef.current;
+
+        // 0. Update Flying Patrol Towers along their flight paths
+        for (const tower of currentTowers) {
+          if (tower.isFlying && tower.flightPath && tower.flightPath.length >= 2) {
+            const flightSpeed = tower.flightSpeed || 90;
+            const progress = tower.flightPathProgress || 0;
+            const { x, y, rotation, newProgressDistance } = advanceFlightPath(
+              tower.flightPath,
+              progress,
+              flightSpeed,
+              dt
+            );
+            tower.x = x;
+            tower.y = y;
+            tower.rotation = rotation;
+            tower.flightPathProgress = newProgressDistance;
+          }
+        }
 
         // 1. Update PowerUp Cooldowns & Combo Cooldowns (guarded to avoid redundant renders)
         setPowerUps((prev) => {
@@ -488,11 +537,24 @@ export default function App() {
             if (enemy.health <= 0) {
               soundManager.playPigDefeat(enemy.isBoss);
               setLevelFeathers((f) => f + enemy.rewardFeathers);
-              setProgression((p) => ({
-                ...p,
-                feathers: p.feathers + enemy.rewardFeathers,
-                acorns: p.acorns + enemy.rewardAcorns,
-              }));
+              const isBoss = enemy.isBoss;
+              setProgression((p) => {
+                let updatedMissions = p.dailyMissions;
+                if (updatedMissions) {
+                  updatedMissions = updateDailyMissionProgress(
+                    updatedMissions,
+                    'defeat_enemies',
+                    1,
+                    enemy.type
+                  ).missions;
+                }
+                return {
+                  ...p,
+                  feathers: p.feathers + enemy.rewardFeathers,
+                  acorns: p.acorns + enemy.rewardAcorns,
+                  dailyMissions: updatedMissions,
+                };
+              });
               setStats((s) => ({ ...s, pigsDefeated: s.pigsDefeated + 1 }));
               physicsEngine.addFloatingText(
                 enemy.x,
@@ -786,40 +848,12 @@ export default function App() {
           const def = TOWERS_DATA[tower.typeId];
           if (!def) continue;
 
-          let effectiveFireRate = def.baseFireRate;
-          let effectiveRange = def.baseRange;
-          let effectiveDamage = def.baseDamage;
-          let effectiveStructuralDmg = def.baseStructuralDamage;
-          let element = def.element;
-
-          for (let i = 0; i < tower.tiers.path_a; i++) {
-            const t = def.paths.path_a.tiers[i];
-            if (t) {
-              effectiveDamage += t.damageBonus;
-              effectiveFireRate *= t.fireRateBonus;
-              effectiveRange += t.rangeBonus;
-              effectiveStructuralDmg *= t.structuralBonus;
-            }
-          }
-          for (let i = 0; i < tower.tiers.path_b; i++) {
-            const t = def.paths.path_b.tiers[i];
-            if (t) {
-              effectiveDamage += t.damageBonus;
-              effectiveFireRate *= t.fireRateBonus;
-              effectiveRange += t.rangeBonus;
-              effectiveStructuralDmg *= t.structuralBonus;
-              if (t.elementBonus) element = t.elementBonus;
-            }
-          }
-          for (let i = 0; i < tower.tiers.path_c; i++) {
-            const t = def.paths.path_c.tiers[i];
-            if (t) {
-              effectiveDamage += t.damageBonus;
-              effectiveFireRate *= t.fireRateBonus;
-              effectiveRange += t.rangeBonus;
-              effectiveStructuralDmg *= t.structuralBonus;
-            }
-          }
+          const tStats = computeEffectiveTowerStats(tower, progression.researchPurchased);
+          const effectiveFireRate = tStats.fireRate;
+          const effectiveRange = tStats.range;
+          const effectiveDamage = tStats.damage;
+          const effectiveStructuralDmg = tStats.structuralDamage;
+          const element = tStats.element;
 
           let target: { x: number; y: number; id?: string } | null = null;
           const inRangeEnemies = currentEnemies.filter((e) => Math.hypot(e.x - tower.x, e.y - tower.y) <= effectiveRange);
@@ -864,6 +898,11 @@ export default function App() {
             let isComboProj = false;
             let comboVis: 'volcanic' | 'thermal' | 'plasma' | 'supersonic' | undefined = undefined;
 
+            if (tower.linkedComboTowerId || (tower.comboPartnerIds && tower.comboPartnerIds.length > 0)) {
+              isComboProj = true;
+              comboVis = 'thermal';
+            }
+
             for (const s of activeSynergiesRef.current) {
               if (s.towerIds.includes(tower.id)) {
                 isComboProj = true;
@@ -896,9 +935,9 @@ export default function App() {
               damage: effectiveDamage,
               structuralDamage: effectiveStructuralDmg,
               element: isComboProj && comboVis === 'volcanic' ? 'fire' : isComboProj && comboVis === 'plasma' ? 'electric' : element,
-              pierceRemaining: def.basePierce + (tower.tiers.path_a > 1 ? 2 : 0),
+              pierceRemaining: tStats.pierce,
               radius: def.projectileRadius,
-              maxDistance: effectiveRange * 1.25,
+              maxDistance: effectiveRange,
               traveledDistance: 0,
               color: isComboProj ? '#F59E0B' : def.accentColor,
               homingTargetEnemyId: tower.typeId === 'falcon' && 'id' in target ? target.id : undefined,
@@ -931,23 +970,86 @@ export default function App() {
           const nextWave = currentWaveIndexRef.current + 1;
           const targetMilestone = currentLevelRef.current.milestoneWaveCount || 40;
 
+          // Track Daily Directive: survive_waves
+          setProgression((p) => {
+            if (!p.dailyMissions) return p;
+            return {
+              ...p,
+              dailyMissions: updateDailyMissionProgress(p.dailyMissions, 'survive_waves', 1).missions,
+            };
+          });
+
+          // Check Endless Milestone Rewards (Round 100 & Round 200)
+          if (isEndlessModeRef.current) {
+            if (nextWave === 100) {
+              const milestoneKey = 'milestone_round_100';
+              setProgression((p) => {
+                if (p.claimedMilestones?.[milestoneKey]) return p;
+                const reward = generateTowerReward(
+                  'round_100',
+                  'Round 100 Centurion Milestone',
+                  p.unlockedTowers
+                );
+                setPendingRewardClaim(reward);
+                return {
+                  ...p,
+                  claimedMilestones: { ...(p.claimedMilestones || {}), [milestoneKey]: true },
+                };
+              });
+            } else if (nextWave === 200) {
+              const milestoneKey = 'milestone_round_200';
+              setProgression((p) => {
+                if (p.claimedMilestones?.[milestoneKey]) return p;
+                const reward = generateTowerReward(
+                  'round_200',
+                  'Round 200 Apex Dominance',
+                  p.unlockedTowers
+                );
+                setPendingRewardClaim(reward);
+                return {
+                  ...p,
+                  claimedMilestones: { ...(p.claimedMilestones || {}), [milestoneKey]: true },
+                };
+              });
+            }
+          }
+
           if (!isEndlessModeRef.current && nextWave > targetMilestone) {
             soundManager.playVictory();
             setIsVictory(true);
             setVictoryModalOpen(true);
-            setProgression((p) => ({
-              ...p,
-              feathers: p.feathers + 300,
-              acorns: p.acorns + 35,
-              shards: p.shards + 10,
-              completedLevels: {
-                ...p.completedLevels,
-                [currentLevelRef.current.id]: {
-                  stars: 3,
-                  highestDifficulty: settingsRef.current.difficulty,
+
+            // Award Campaign clear reward (with one-time milestone protection)
+            const milestoneKey = `campaign_${currentLevelRef.current.id}`;
+            setProgression((p) => {
+              const alreadyClaimed = p.claimedMilestones?.[milestoneKey];
+              if (!alreadyClaimed) {
+                const tier = currentLevelRef.current.bossData ? 'boss_clear' : 'campaign_clear';
+                const reward = generateTowerReward(
+                  tier,
+                  currentLevelRef.current.name,
+                  p.unlockedTowers
+                );
+                setPendingRewardClaim(reward);
+              }
+              return {
+                ...p,
+                feathers: p.feathers + 300,
+                acorns: p.acorns + 35,
+                shards: p.shards + 10,
+                claimedMilestones: {
+                  ...(p.claimedMilestones || {}),
+                  [milestoneKey]: true,
                 },
-              },
-            }));
+                completedLevels: {
+                  ...p.completedLevels,
+                  [currentLevelRef.current.id]: {
+                    stars: 3,
+                    highestDifficulty: settingsRef.current.difficulty,
+                  },
+                },
+              };
+            });
           } else {
             setCurrentWaveIndex(nextWave);
             // Automatic wave progression with tracked cancellable timeout
@@ -994,24 +1096,30 @@ export default function App() {
     soundManager.playUpgrade();
     setLevelFeathers((f) => f - def.baseCost);
 
-    const baseHealthByType: Record<TowerTypeId, number> = {
-      cardinal: 550,
-      owl: 520,
-      falcon: 480,
-      woodpecker: 500,
-      penguin: 540,
-      phoenix: 650,
-      bomb_bird: 750,
-    };
-    const initialHp = baseHealthByType[typeId] || 500;
+    const initialHp = TOWER_BASE_HEALTH[typeId] || 500;
+    const isFlying = def.isFlying || false;
+    const flightPath = isFlying
+      ? createDefaultFlightPath(Math.round(x), Math.round(y), 110)
+      : undefined;
+    const flightSpeed = def.flightSpeed || 90;
+
+    // Preserve pre-upgraded loadout tiers and locked path if deployed from My Towers
+    const preUpgraded = selectedPreUpgradedLoadout;
+    const tiers =
+      preUpgraded && preUpgraded.typeId === typeId
+        ? { ...preUpgraded.tiers }
+        : { path_a: 0, path_b: 0, path_c: 0 };
+    const lockedPath =
+      preUpgraded && preUpgraded.typeId === typeId ? preUpgraded.lockedPath : null;
+
     const newTower: PlacedTower = {
       id: `tower-${Date.now()}-${Math.random()}`,
       typeId,
       x: Math.round(x),
       y: Math.round(y),
-      level: 1,
-      tiers: { path_a: 0, path_b: 0, path_c: 0 },
-      lockedPath: null,
+      level: (tiers.path_a + tiers.path_b + tiers.path_c) || 1,
+      tiers,
+      lockedPath,
       targetPriority: 'first',
       lastFired: 0,
       rotation: 0,
@@ -1020,11 +1128,75 @@ export default function App() {
       health: initialHp,
       maxHealth: initialHp,
       lastDamagedTime: 0,
+      isFlying,
+      flightPath,
+      flightSpeed,
+      flightPathProgress: 0,
+      isPreUpgraded: !!preUpgraded,
+      loadoutId: preUpgraded?.id,
     };
 
     setPlacedTowers((prev) => [...prev, newTower]);
     setSelectedDeployType(null);
+    setSelectedPreUpgradedLoadout(null);
     setSelectedTower(newTower);
+  };
+
+  // Deliberate Player-Chosen Tower Combo Linking
+  const handleToggleComboPartner = (towerId: string, partnerTowerId: string) => {
+    soundManager.playClick();
+    setPlacedTowers((prev) =>
+      prev.map((t) => {
+        if (t.id === towerId) {
+          const partners = t.comboPartnerIds || [];
+          const nextPartners = partners.includes(partnerTowerId)
+            ? partners.filter((id) => id !== partnerTowerId)
+            : [...partners, partnerTowerId];
+          return {
+            ...t,
+            comboPartnerIds: nextPartners,
+            linkedComboTowerId: nextPartners[0] || null,
+          };
+        }
+        if (t.id === partnerTowerId) {
+          const partners = t.comboPartnerIds || [];
+          const nextPartners = partners.includes(towerId)
+            ? partners.filter((id) => id !== towerId)
+            : [...partners, towerId];
+          return {
+            ...t,
+            comboPartnerIds: nextPartners,
+            linkedComboTowerId: nextPartners[0] || null,
+          };
+        }
+        return t;
+      })
+    );
+    setSelectedTower((prev) => {
+      if (!prev) return null;
+      if (prev.id === towerId) {
+        const partners = prev.comboPartnerIds || [];
+        const nextPartners = partners.includes(partnerTowerId)
+          ? partners.filter((id) => id !== partnerTowerId)
+          : [...partners, partnerTowerId];
+        return {
+          ...prev,
+          comboPartnerIds: nextPartners,
+          linkedComboTowerId: nextPartners[0] || null,
+        };
+      }
+      return prev;
+    });
+  };
+
+  // Aerial Patrol Flight Path Waypoint Updates
+  const handleUpdateFlightPath = (towerId: string, waypoints: { x: number; y: number }[]) => {
+    setPlacedTowers((prev) =>
+      prev.map((t) => (t.id === towerId ? { ...t, flightPath: waypoints } : t))
+    );
+    setSelectedTower((prev) =>
+      prev && prev.id === towerId ? { ...prev, flightPath: waypoints } : prev
+    );
   };
 
   // Upgrades with health scaling
@@ -1352,6 +1524,32 @@ export default function App() {
         );
         break;
       }
+
+      case 'harrier': {
+        // Supersonic Strafe Run: High-speed strafe bombarding column of enemies
+        physicsEngine.state.screenShake = 0.55;
+        physicsEngine.spawnParticles(tower.x, tower.y, 50, '#38BDF8', 160, 260);
+        physicsEngine.addFloatingText(tower.x, tower.y - 25, '🚀 SUPERSONIC STRAFE RUN!', '#38BDF8', 2.0);
+
+        setEnemies((prev) =>
+          prev.map((e) => {
+            const dist = Math.hypot(e.x - tower.x, e.y - tower.y);
+            if (dist <= 220) {
+              physicsEngine.addFloatingText(e.x, e.y - 15, '-320 STRAFE!', '#38BDF8');
+              physicsEngine.spawnParticles(e.x, e.y, 10, '#0284C7', 100, 180);
+              return {
+                ...e,
+                health: e.health - 320,
+                slowTimer: 3.0,
+                slowMultiplier: 0.45,
+                armor: Math.max(0, e.armor - 15),
+              };
+            }
+            return e;
+          })
+        );
+        break;
+      }
     }
   };
 
@@ -1364,6 +1562,14 @@ export default function App() {
       ...prev,
       [abilityName]: 15,
     }));
+    setStats((s) => ({ ...s, combosTriggered: s.combosTriggered + 1 }));
+    setProgression((p) => {
+      if (!p.dailyMissions) return p;
+      return {
+        ...p,
+        dailyMissions: updateDailyMissionProgress(p.dailyMissions, 'trigger_combos', 1).missions,
+      };
+    });
   };
 
   const handleTriggerPowerUp = (id: 'bombardment' | 'frenzy' | 'timewarp' | 'resonance') => {
@@ -1452,6 +1658,98 @@ export default function App() {
     setCurrentTab('battle');
   };
 
+  // Multi-slot Save Actions
+  const handleSwitchSlot = (slotId: string) => {
+    setActiveSaveSlotId(slotId);
+    setActiveSlotIdState(slotId);
+    const slots = getAllSaveSlots();
+    const slotData = slots.find((s) => s.id === slotId) || slots[0];
+    setProgression(slotData.progression);
+    setSettings(slotData.settings);
+    initLevel(CAMPAIGN_LEVELS[0]);
+    setAllSlots(getAllSaveSlots());
+    setIsSaveManagerOpen(false);
+    physicsEngine.addFloatingText(450, 260, `SLOT LOADED: ${slotData.name}`, '#38BDF8', 1.5);
+  };
+
+  const handleSaveToSlot = (slotId: string, customName?: string) => {
+    const cur = getActiveSaveSlot();
+    saveSlot({
+      ...cur,
+      id: slotId,
+      name: customName || cur.name,
+      progression,
+      settings,
+      highestWaveReached: Math.max(currentWaveIndex + 1, cur.highestWaveReached),
+    });
+    setAllSlots(getAllSaveSlots());
+    physicsEngine.addFloatingText(450, 260, `SLOT ${slotId} SAVED`, '#10B981', 1.5);
+  };
+
+  const handleDeleteSlot = (slotId: string) => {
+    deleteSaveSlot(slotId);
+    setAllSlots(getAllSaveSlots());
+  };
+
+  const handleRenameSlot = (slotId: string, newName: string) => {
+    renameSaveSlot(slotId, newName);
+    setAllSlots(getAllSaveSlots());
+  };
+
+  // Daily Missions Claim Action
+  const handleClaimDailyMission = (missionId: string) => {
+    if (!progression.dailyMissions) return;
+    const result = claimDailyMissionReward(progression.dailyMissions, missionId);
+    if (result) {
+      soundManager.playUpgrade();
+      setProgression((p) => ({
+        ...p,
+        acorns: p.acorns + result.awardedAcorns,
+        advancedTokens: (p.advancedTokens || 0) + result.awardedAdvancedTokens,
+        dailyMissions: result.missions,
+      }));
+      physicsEngine.addFloatingText(
+        450,
+        260,
+        `DIRECTIVE CLAIMED! +${result.awardedAdvancedTokens} ASTRAL TOKENS`,
+        '#C084FC',
+        1.8
+      );
+    }
+  };
+
+  const handleResetFlightPath = (towerId: string) => {
+    const tower = placedTowers.find((t) => t.id === towerId);
+    if (!tower) return;
+    const newPath = createDefaultFlightPath(tower.x, tower.y, 110);
+    handleUpdateFlightPath(towerId, newPath);
+  };
+
+  // Milestone Reward Claim Actions
+  const handleClaimPendingReward = () => {
+    if (!pendingRewardClaim) return;
+    soundManager.playUpgrade();
+    setProgression((p) => ({
+      ...p,
+      rewardedTowers: [...(p.rewardedTowers || []), pendingRewardClaim],
+    }));
+    setPendingRewardClaim(null);
+  };
+
+  const handleDeployNowPendingReward = () => {
+    if (!pendingRewardClaim) return;
+    soundManager.playUpgrade();
+    const reward = pendingRewardClaim;
+    setProgression((p) => ({
+      ...p,
+      rewardedTowers: [...(p.rewardedTowers || []), reward],
+    }));
+    setSelectedPreUpgradedLoadout(reward);
+    setSelectedDeployType(reward.typeId);
+    setPendingRewardClaim(null);
+    setCurrentTab('battle');
+  };
+
   return (
     <div className="min-h-screen bg-stone-950 text-stone-100 flex flex-col font-sans">
       {/* Top Bar Contract (Wordmark - Nav - Resources) */}
@@ -1461,6 +1759,12 @@ export default function App() {
         feathers={progression.feathers}
         acorns={progression.acorns}
         shards={progression.shards}
+        advancedTokens={progression.advancedTokens || 0}
+        hasUnclaimedDailyMissions={progression.dailyMissions?.some(
+          (m) => m.completed && !m.claimed
+        )}
+        onOpenDailyMissions={() => setIsDailyMissionsOpen(true)}
+        onOpenSaveManager={() => setIsSaveManagerOpen(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
       />
 
@@ -1555,7 +1859,7 @@ export default function App() {
                   <span>Restart Stage</span>
                 </button>
 
-                {/* Launch Wave button (Unlocked! Can send multiple waves simultaneously!) */}
+                {/* Launch Wave button */}
                 <button
                   onClick={handleStartWave}
                   className={`px-3.5 py-1.5 rounded-lg font-bold flex items-center gap-1.5 transition-colors shadow-md ${
@@ -1591,6 +1895,9 @@ export default function App() {
               onTriggerPowerUpLocation={handleTriggerPowerUpLocation}
               previewTowerType={selectedDeployType}
               showDamageNumbers={settings.showDamageNumbers}
+              researchPurchased={progression.researchPurchased}
+              isEditingFlightPath={isEditingFlightPath}
+              onUpdateFlightPath={handleUpdateFlightPath}
             />
 
             {/* Active Synergies, Formations & Clickable Combo Powers */}
@@ -1601,37 +1908,59 @@ export default function App() {
               comboCooldowns={comboCooldowns}
             />
 
-            {/* Interactive Control Deck: Free Placement Tower Bar, Power-Ups, or Tower Upgrade Panel */}
-            <div className="flex flex-col gap-2">
-              {selectedTower ? (
-                <div className="flex justify-center">
-                  <TowerUpgradePanel
-                    tower={selectedTower}
-                    feathers={levelFeathers}
-                    onUpgradePath={handleUpgradePath}
-                    onSetPriority={handleSetPriority}
-                    onSellTower={handleSellTower}
-                    onTriggerAbility={handleTriggerTowerAbility}
-                    onClose={() => setSelectedTower(null)}
-                  />
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-2">
-                  <TowerPlaceBar
-                    unlockedTowers={progression.unlockedTowers}
-                    selectedType={selectedDeployType}
-                    onSelectType={(t) => setSelectedDeployType(t)}
-                    feathers={levelFeathers}
-                  />
-                  <PowerUpBar
-                    feathers={levelFeathers}
-                    powerUps={powerUps}
-                    onTriggerPowerUp={handleTriggerPowerUp}
-                    activePowerUpId={targetingPowerUp}
-                  />
-                </div>
-              )}
+            {/* Tactical Power-Ups Deck */}
+            <div className="w-full">
+              <PowerUpBar
+                feathers={levelFeathers}
+                powerUps={powerUps}
+                onTriggerPowerUp={handleTriggerPowerUp}
+                activePowerUpId={targetingPowerUp}
+              />
             </div>
+
+            {/* Unified Bloons TD 6-Inspired Modern Tower Drawer */}
+            <ModernTowerDrawer
+              unlockedTowers={progression.unlockedTowers}
+              rewardedTowers={progression.rewardedTowers || []}
+              selectedDeployType={selectedDeployType}
+              selectedPreUpgradedLoadout={selectedPreUpgradedLoadout}
+              onSelectDeployType={(t: TowerTypeId | null) => {
+                setSelectedDeployType(t);
+                setSelectedPreUpgradedLoadout(null);
+              }}
+              onSelectPreUpgradedLoadout={(loadout) => {
+                setSelectedPreUpgradedLoadout(loadout);
+                if (loadout) {
+                  setSelectedDeployType(loadout.typeId);
+                  if (loadout.isNew) {
+                    setProgression((p) => ({
+                      ...p,
+                      rewardedTowers: (p.rewardedTowers || []).map((lt) =>
+                        lt.id === loadout.id ? { ...lt, isNew: false } : lt
+                      ),
+                    }));
+                  }
+                } else {
+                  setSelectedDeployType(null);
+                }
+              }}
+              feathers={levelFeathers}
+              selectedTower={selectedTower}
+              placedTowers={placedTowers}
+              researchPurchased={progression.researchPurchased}
+              onUpgradePath={handleUpgradePath}
+              onSetPriority={handleSetPriority}
+              onSellTower={handleSellTower}
+              onTriggerAbility={handleTriggerTowerAbility}
+              onToggleComboLink={handleToggleComboPartner}
+              isEditingFlightPath={isEditingFlightPath}
+              onToggleFlightPathEdit={() => setIsEditingFlightPath((p) => !p)}
+              onResetFlightPath={handleResetFlightPath}
+              onCloseSelectedTower={() => {
+                setSelectedTower(null);
+                setIsEditingFlightPath(false);
+              }}
+            />
           </div>
         )}
 
@@ -1676,13 +2005,19 @@ export default function App() {
           <ResearchTreeModal
             acorns={progression.acorns}
             shards={progression.shards}
+            advancedTokens={progression.advancedTokens || 0}
             purchasedResearch={progression.researchPurchased}
-            onUnlockResearch={(nodeId, acornCost, shardCost) => {
-              if (progression.acorns >= acornCost && progression.shards >= shardCost) {
+            onUnlockResearch={(nodeId, acornCost, shardCost, advCost = 0) => {
+              if (
+                progression.acorns >= acornCost &&
+                progression.shards >= shardCost &&
+                (progression.advancedTokens || 0) >= advCost
+              ) {
                 setProgression((p) => ({
                   ...p,
                   acorns: p.acorns - acornCost,
                   shards: p.shards - shardCost,
+                  advancedTokens: (p.advancedTokens || 0) - advCost,
                   researchPurchased: [...p.researchPurchased, nodeId],
                 }));
               }
@@ -1714,6 +2049,39 @@ export default function App() {
           settings={settings}
           onUpdateSettings={(newS) => setSettings((s) => ({ ...s, ...newS }))}
           onClose={() => setIsSettingsOpen(false)}
+        />
+      )}
+
+      {/* Save Manager Modal */}
+      {isSaveManagerOpen && (
+        <SaveManagerModal
+          slots={allSlots}
+          activeSlotId={activeSlotId}
+          onSelectSlot={handleSwitchSlot}
+          onOverwriteSlot={handleSaveToSlot}
+          onRenameSlot={handleRenameSlot}
+          onDeleteSlot={handleDeleteSlot}
+          onClose={() => setIsSaveManagerOpen(false)}
+        />
+      )}
+
+      {/* Daily Directives Modal */}
+      {isDailyMissionsOpen && (
+        <DailyMissionsModal
+          missions={progression.dailyMissions || []}
+          todayDate={progression.dailyMissionsDate || new Date().toISOString().slice(0, 10)}
+          advancedTokens={progression.advancedTokens || 0}
+          onClaimReward={handleClaimDailyMission}
+          onClose={() => setIsDailyMissionsOpen(false)}
+        />
+      )}
+
+      {/* Milestone Tower Reward Modal */}
+      {pendingRewardClaim && (
+        <RewardClaimModal
+          reward={pendingRewardClaim}
+          onClaim={handleClaimPendingReward}
+          onDeployNow={handleDeployNowPendingReward}
         />
       )}
 

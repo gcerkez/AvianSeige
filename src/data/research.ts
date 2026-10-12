@@ -10,6 +10,7 @@ export interface ResearchNode {
   description: string;
   acornCost: number;
   shardCost: number;
+  advancedTokenCost?: number;
   prerequisites: string[];
   icon: string;
 }
@@ -353,5 +354,49 @@ export const RESEARCH_NODES: ResearchNode[] = [
     shardCost: 85,
     prerequisites: ['res_nanobird_repair'],
     icon: 'Sparkles',
+  },
+  {
+    id: 'res_aerial_vectoring',
+    category: 'Avian Engineering',
+    name: 'Advanced Vector Thrust',
+    description: 'Increases Harrier flight patrol velocity by +25% and strafe detection radius by +20px.',
+    acornCost: 40,
+    shardCost: 0,
+    advancedTokenCost: 10,
+    prerequisites: ['res_aerodynamics'],
+    icon: 'Wind',
+  },
+  {
+    id: 'res_combo_overdrive',
+    category: 'Tactical Command',
+    name: 'Tactical Synergy Overdrive',
+    description: 'Reduces the cooldowns of all deliberate tower combo abilities by -25%.',
+    acornCost: 50,
+    shardCost: 0,
+    advancedTokenCost: 12,
+    prerequisites: ['res_tactical_acorns'],
+    icon: 'Zap',
+  },
+  {
+    id: 'res_resource_logistics',
+    category: 'Tactical Command',
+    name: 'Strategic Feather Air-Drop',
+    description: 'Grants +60 starting feathers at the beginning of every battle.',
+    acornCost: 35,
+    shardCost: 0,
+    advancedTokenCost: 8,
+    prerequisites: ['res_feather_economy'],
+    icon: 'Coins',
+  },
+  {
+    id: 'res_preupgraded_efficiency',
+    category: 'Avian Engineering',
+    name: 'Master Artisan Perches',
+    description: 'All pre-upgraded reward towers gain +150 Max HP and a 15% placement feather discount.',
+    acornCost: 60,
+    shardCost: 0,
+    advancedTokenCost: 15,
+    prerequisites: ['res_apex_overdrive'],
+    icon: 'Shield',
   },
 ];

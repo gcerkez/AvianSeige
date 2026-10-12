@@ -13,6 +13,7 @@ import {
 } from '../types/game';
 import { TOWERS_DATA } from '../data/towers';
 import { physicsEngine, Particle } from '../physics/engine';
+import { getEffectiveTowerRange } from '../utils/towerStats';
 
 interface GameCanvasProps {
   towers: PlacedTower[];
@@ -32,6 +33,9 @@ interface GameCanvasProps {
   onTriggerPowerUpLocation: (x: number, y: number) => void;
   previewTowerType: TowerTypeId | null;
   showDamageNumbers: boolean;
+  researchPurchased?: string[];
+  isEditingFlightPath?: boolean;
+  onUpdateFlightPath?: (towerId: string, waypoints: { x: number; y: number }[]) => void;
 }
 
 // Distance from point to line segment
@@ -119,19 +123,42 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   onTriggerPowerUpLocation,
   previewTowerType,
   showDamageNumbers,
+  researchPurchased = [],
+  isEditingFlightPath = false,
+  onUpdateFlightPath,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const mousePosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
 
-  // Handle canvas click / touch
-  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  // Unified Interaction Handler (handles both mouse clicks and touch taps)
+  const handleInteractionAt = (clientX: number, clientY: number) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
-    const x = (e.clientX - rect.x) * scaleX;
-    const y = (e.clientY - rect.y) * scaleY;
+    const x = (clientX - rect.left) * scaleX;
+    const y = (clientY - rect.top) * scaleY;
+
+    // Flight Path Waypoint Configuration mode
+    if (isEditingFlightPath && selectedTowerId && onUpdateFlightPath) {
+      const activeTower = towers.find((t) => t.id === selectedTowerId);
+      if (activeTower && activeTower.isFlying) {
+        const curPath = activeTower.flightPath || [];
+        // Check if tapped near an existing waypoint to remove it (if more than 2)
+        const nearIdx = curPath.findIndex((wp) => Math.hypot(wp.x - x, wp.y - y) <= 20);
+        if (nearIdx >= 0 && curPath.length > 2) {
+          const updated = curPath.filter((_, i) => i !== nearIdx);
+          onUpdateFlightPath(activeTower.id, updated);
+          return;
+        } else if (curPath.length < 8) {
+          // Append waypoint
+          const updated = [...curPath, { x: Math.round(x), y: Math.round(y) }];
+          onUpdateFlightPath(activeTower.id, updated);
+          return;
+        }
+      }
+    }
 
     // Tactical Power-Up Targeting (e.g. Egg Bombardment)
     if (targetingPowerUp) {
@@ -150,7 +177,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
 
     // Check if clicked an existing placed tower to inspect & upgrade
     for (const t of towers) {
-      if (Math.hypot(t.x - x, t.y - y) <= 24) {
+      if (Math.hypot(t.x - x, t.y - y) <= 26) {
         onSelectTower(t);
         return;
       }
@@ -160,15 +187,15 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     onSelectTower(null);
   };
 
-  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handlePointerMove = (clientX: number, clientY: number) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
     const scaleX = canvas.width / rect.width;
     const scaleY = canvas.height / rect.height;
     mousePosRef.current = {
-      x: (e.clientX - rect.x) * scaleX,
-      y: (e.clientY - rect.y) * scaleY,
+      x: (clientX - rect.left) * scaleX,
+      y: (clientY - rect.top) * scaleY,
     };
   };
 
@@ -199,11 +226,17 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       // 1. Terrain & Winding Curvy Road (Procedural Biome Aesthetic)
       drawCurvyTerrain(ctx, canvas.width, canvas.height, pathWaypoints, regionalBiome);
 
+      // 1.2 Environmental Scenery (Farmland, crop rows, orchards, waterways, bridges, fences)
+      drawEnvironmentalScenery(ctx, canvas.width, canvas.height, regionalBiome, pathWaypoints);
+
       // 1.5 Temporary Structural Collapse Craters & Rubble Obstacles
       drawCollapseCraters(ctx, craters);
 
       // 2. Combo Resonance Fields & Synergy Arcs
       drawSynergyLinks(ctx, synergies, formations, towers);
+
+      // 2.2 Flight Patrol Paths & Waypoints (Aerial Units)
+      drawFlightPaths(ctx, towers, selectedTowerId, isEditingFlightPath);
 
       // 3. Destructible Structures (Pillars, Beams, Arches, Barrels)
       drawStructures(ctx, structures);
@@ -211,8 +244,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       // 4. Marching Pigs (Enemies & Bosses)
       drawEnemies(ctx, enemies);
 
-      // 5. Placed Avian Towers
-      drawTowers(ctx, towers, selectedTowerId, synergies, formations);
+      // 5. Placed Avian Towers (Accurate Range & Aerial Sprites)
+      drawTowers(ctx, towers, selectedTowerId, synergies, formations, researchPurchased);
 
       // 6. Projectiles & Particle Trails
       drawProjectiles(ctx, projectiles);
@@ -226,7 +259,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         drawFloatingTexts(ctx, physicsEngine.floatingTexts);
       }
 
-      // 8. Dynamic Placement Cursor Ghost
+      // 8. Dynamic Placement Cursor Ghost (Accurate Range)
       if (previewTowerType) {
         drawPlacementGhost(
           ctx,
@@ -236,7 +269,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
           pathWaypoints,
           structures,
           towers,
-          craters
+          craters,
+          researchPurchased
         );
       }
 
@@ -267,6 +301,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     targetingPowerUp,
     previewTowerType,
     showDamageNumbers,
+    researchPurchased,
+    isEditingFlightPath,
   ]);
 
   return (
@@ -275,9 +311,19 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
         ref={canvasRef}
         width={900}
         height={560}
-        onClick={handleCanvasClick}
-        onMouseMove={handleMouseMove}
-        className="w-full h-full object-contain cursor-crosshair"
+        onClick={(e) => handleInteractionAt(e.clientX, e.clientY)}
+        onMouseMove={(e) => handlePointerMove(e.clientX, e.clientY)}
+        onTouchStart={(e) => {
+          if (e.touches.length === 1) {
+            handleInteractionAt(e.touches[0].clientX, e.touches[0].clientY);
+          }
+        }}
+        onTouchMove={(e) => {
+          if (e.touches.length === 1) {
+            handlePointerMove(e.touches[0].clientX, e.touches[0].clientY);
+          }
+        }}
+        className="w-full h-full object-contain cursor-crosshair touch-none"
       />
     </div>
   );
@@ -477,6 +523,284 @@ function drawCurvyTerrain(
   }
 }
 
+function drawEnvironmentalScenery(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  biome: RegionalBiome = 'glacial',
+  waypoints: { x: number; y: number }[]
+) {
+  ctx.save();
+
+  // 1. Farmland Plots / Tilled Crop Soil
+  const plots = [
+    { x: 45, y: 380, width: 110, height: 75, type: 'wheat' },
+    { x: 740, y: 70, width: 120, height: 80, type: 'furrows' },
+    { x: 720, y: 390, width: 130, height: 90, type: 'orchard' },
+  ];
+
+  for (const plot of plots) {
+    ctx.fillStyle =
+      biome === 'glacial'
+        ? '#132338'
+        : biome === 'desert'
+        ? '#3d2314'
+        : biome === 'volcanic'
+        ? '#261212'
+        : '#271d15';
+    ctx.fillRect(plot.x, plot.y, plot.width, plot.height);
+    ctx.strokeStyle = biome === 'glacial' ? '#1e3a5f' : '#452b1b';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(plot.x, plot.y, plot.width, plot.height);
+
+    // Split-rail fence posts
+    ctx.fillStyle = '#78350f';
+    const postStep = 25;
+    for (let px = plot.x; px <= plot.x + plot.width; px += postStep) {
+      ctx.fillRect(px - 2, plot.y - 3, 4, 6);
+      ctx.fillRect(px - 2, plot.y + plot.height - 3, 4, 6);
+    }
+
+    if (plot.type === 'wheat') {
+      ctx.strokeStyle = biome === 'glacial' ? '#38bdf8' : '#eab308';
+      ctx.lineWidth = 2;
+      for (let py = plot.y + 12; py < plot.y + plot.height - 6; py += 12) {
+        ctx.beginPath();
+        ctx.moveTo(plot.x + 8, py);
+        ctx.lineTo(plot.x + plot.width - 8, py);
+        ctx.stroke();
+      }
+    } else if (plot.type === 'furrows') {
+      ctx.strokeStyle = biome === 'glacial' ? '#0284c7' : '#84cc16';
+      ctx.lineWidth = 1.8;
+      ctx.setLineDash([4, 6]);
+      for (let py = plot.y + 10; py < plot.y + plot.height - 6; py += 10) {
+        ctx.beginPath();
+        ctx.moveTo(plot.x + 6, py);
+        ctx.lineTo(plot.x + plot.width - 6, py);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+    } else if (plot.type === 'orchard') {
+      const trees = [
+        { ox: 25, oy: 25 },
+        { ox: 65, oy: 25 },
+        { ox: 105, oy: 25 },
+        { ox: 45, oy: 65 },
+        { ox: 85, oy: 65 },
+      ];
+      for (const t of trees) {
+        const tx = plot.x + t.ox;
+        const ty = plot.y + t.oy;
+        ctx.fillStyle = 'rgba(0,0,0,0.35)';
+        ctx.beginPath();
+        ctx.ellipse(tx + 2, ty + 6, 12, 6, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#78350f';
+        ctx.fillRect(tx - 2, ty, 4, 7);
+
+        ctx.fillStyle =
+          biome === 'glacial' ? '#0369a1' : biome === 'volcanic' ? '#7f1d1d' : '#15803d';
+        ctx.beginPath();
+        ctx.arc(tx, ty - 2, 11, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle =
+          biome === 'glacial' ? '#38bdf8' : biome === 'volcanic' ? '#ea580c' : '#22c55e';
+        ctx.beginPath();
+        ctx.arc(tx - 3, ty - 5, 6, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = '#ef4444';
+        ctx.beginPath();
+        ctx.arc(tx + 4, ty - 4, 2, 0, Math.PI * 2);
+        ctx.arc(tx - 4, ty + 2, 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  // 2. Meandering Waterway / River with Water Ripples
+  const riverColor =
+    biome === 'glacial' ? '#0284c7' : biome === 'volcanic' ? '#ea580c' : '#0ea5e9';
+  const riverBank =
+    biome === 'glacial' ? '#0369a1' : biome === 'volcanic' ? '#9a3412' : '#0369a1';
+
+  ctx.save();
+  ctx.strokeStyle = riverBank;
+  ctx.lineWidth = 26;
+  ctx.beginPath();
+  ctx.moveTo(320, 0);
+  ctx.bezierCurveTo(340, 150, 270, 260, 310, 420);
+  ctx.bezierCurveTo(330, 480, 380, 520, 410, 560);
+  ctx.stroke();
+
+  ctx.strokeStyle = riverColor;
+  ctx.lineWidth = 18;
+  ctx.beginPath();
+  ctx.moveTo(320, 0);
+  ctx.bezierCurveTo(340, 150, 270, 260, 310, 420);
+  ctx.bezierCurveTo(330, 480, 380, 520, 410, 560);
+  ctx.stroke();
+
+  ctx.strokeStyle = '#ffffff';
+  ctx.globalAlpha = 0.35;
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([8, 18]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+
+  // 3. Wooden Bridge where road intersects river
+  for (let i = 0; i < waypoints.length - 1; i++) {
+    const p1 = waypoints[i];
+    const p2 = waypoints[i + 1];
+    if ((p1.x <= 315 && p2.x >= 300) || (p1.x >= 300 && p2.x <= 315)) {
+      const midX = (p1.x + p2.x) / 2;
+      const midY = (p1.y + p2.y) / 2;
+      ctx.save();
+      ctx.translate(midX, midY);
+      const angle = Math.atan2(p2.y - p1.y, p2.x - p1.x);
+      ctx.rotate(angle);
+      ctx.fillStyle = '#78350f';
+      ctx.fillRect(-22, -26, 44, 52);
+      ctx.strokeStyle = '#451a03';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(-22, -26, 44, 52);
+
+      ctx.strokeStyle = '#92400e';
+      ctx.lineWidth = 1.5;
+      for (let bx = -18; bx <= 18; bx += 6) {
+        ctx.beginPath();
+        ctx.moveTo(bx, -25);
+        ctx.lineTo(bx, 25);
+        ctx.stroke();
+      }
+
+      ctx.strokeStyle = '#f59e0b';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(-22, -25);
+      ctx.lineTo(22, -25);
+      ctx.moveTo(-22, 25);
+      ctx.lineTo(22, 25);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  // 4. Wild Trees scattered across the biome
+  const wildTrees = [
+    { x: 120, y: 130 },
+    { x: 520, y: 80 },
+    { x: 570, y: 120 },
+    { x: 230, y: 460 },
+    { x: 830, y: 490 },
+  ];
+  for (const wt of wildTrees) {
+    ctx.fillStyle = 'rgba(0,0,0,0.3)';
+    ctx.beginPath();
+    ctx.ellipse(wt.x + 3, wt.y + 7, 14, 7, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#78350f';
+    ctx.fillRect(wt.x - 2, wt.y, 4, 8);
+
+    ctx.fillStyle =
+      biome === 'glacial'
+        ? '#0284c7'
+        : biome === 'volcanic'
+        ? '#991b1b'
+        : biome === 'desert'
+        ? '#b45309'
+        : '#166534';
+    ctx.beginPath();
+    ctx.arc(wt.x, wt.y - 4, 13, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle =
+      biome === 'glacial'
+        ? '#38bdf8'
+        : biome === 'volcanic'
+        ? '#ea580c'
+        : biome === 'desert'
+        ? '#d97706'
+        : '#22c55e';
+    ctx.beginPath();
+    ctx.arc(wt.x - 4, wt.y - 7, 7, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+function drawFlightPaths(
+  ctx: CanvasRenderingContext2D,
+  towers: PlacedTower[],
+  selectedTowerId: string | null,
+  isEditingFlightPath: boolean
+) {
+  const animTime = performance.now() * 0.003;
+
+  for (const tower of towers) {
+    if (!tower.isFlying || !tower.flightPath || tower.flightPath.length < 2) continue;
+
+    const isSelected = tower.id === selectedTowerId;
+    const path = tower.flightPath;
+
+    ctx.save();
+    // Flight corridor loop
+    ctx.strokeStyle = isSelected ? 'rgba(56, 189, 248, 0.9)' : 'rgba(56, 189, 248, 0.35)';
+    ctx.lineWidth = isSelected ? 2.5 : 1.5;
+    ctx.setLineDash([8, 8]);
+    ctx.lineDashOffset = -animTime * 30;
+
+    ctx.beginPath();
+    ctx.moveTo(path[0].x, path[0].y);
+    for (let i = 1; i < path.length; i++) {
+      ctx.lineTo(path[i].x, path[i].y);
+    }
+    ctx.closePath();
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Waypoint handles
+    if (isSelected || isEditingFlightPath) {
+      for (let i = 0; i < path.length; i++) {
+        const wp = path[i];
+        ctx.fillStyle = isEditingFlightPath ? '#0284c7' : '#0369a1';
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(wp.x, wp.y, 7, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 8px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText((i + 1).toString(), wp.x, wp.y + 3);
+      }
+
+      if (isEditingFlightPath && isSelected) {
+        ctx.fillStyle = 'rgba(12, 10, 9, 0.88)';
+        ctx.strokeStyle = '#38bdf8';
+        ctx.lineWidth = 1;
+        ctx.fillRect(tower.x - 90, tower.y - 48, 180, 20);
+        ctx.strokeRect(tower.x - 90, tower.y - 48, 180, 20);
+
+        ctx.fillStyle = '#7dd3fc';
+        ctx.font = 'bold 9px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('CLICK TO ADD/REMOVE WAYPOINT', tower.x, tower.y - 35);
+      }
+    }
+
+    ctx.restore();
+  }
+}
+
 function drawCollapseCraters(ctx: CanvasRenderingContext2D, craters: CollapseCrater[]) {
   const animTime = performance.now() * 0.003;
 
@@ -623,7 +947,50 @@ function drawSynergyLinks(
   const towerMap = new Map(towers.map((t) => [t.id, t]));
   const animTime = performance.now() * 0.003;
 
-  // Draw Proximity & Combo links between adjacent towers
+  // 1. Draw Deliberate Player-Chosen Combo links
+  const drawnDeliberatePairs = new Set<string>();
+  for (const tower of towers) {
+    const partnerIds = [
+      ...(tower.comboPartnerIds || []),
+      ...(tower.linkedComboTowerId ? [tower.linkedComboTowerId] : []),
+    ];
+    for (const pId of partnerIds) {
+      const pairKey = [tower.id, pId].sort().join(':');
+      if (drawnDeliberatePairs.has(pairKey)) continue;
+      drawnDeliberatePairs.add(pairKey);
+
+      const pTower = towerMap.get(pId);
+      if (pTower) {
+        const pulse = 0.5 + Math.sin(animTime * 4) * 0.5;
+        ctx.save();
+        // Golden resonating laser link
+        ctx.strokeStyle = '#F59E0B';
+        ctx.globalAlpha = 0.45 + pulse * 0.3;
+        ctx.lineWidth = 3.5 + pulse * 1.5;
+        ctx.beginPath();
+        ctx.moveTo(tower.x, tower.y);
+        ctx.lineTo(pTower.x, pTower.y);
+        ctx.stroke();
+
+        ctx.strokeStyle = '#FEF08A';
+        ctx.globalAlpha = 0.9;
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+
+        // Traveling energy spark
+        const sparkPos = (animTime * 0.8) % 1;
+        const sx = tower.x + (pTower.x - tower.x) * sparkPos;
+        const sy = tower.y + (pTower.y - tower.y) * sparkPos;
+        ctx.fillStyle = '#FFFFFF';
+        ctx.beginPath();
+        ctx.arc(sx, sy, 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+  }
+
+  // 2. Draw Proximity & Combo links between adjacent towers
   for (const s of synergies) {
     const t1 = towerMap.get(s.towerIds[0]);
     const t2 = towerMap.get(s.towerIds[1]);
@@ -744,12 +1111,32 @@ function drawPlacementGhost(
   waypoints: { x: number; y: number }[],
   structures: StructureBlock[],
   towers: PlacedTower[],
-  craters: CollapseCrater[] = []
+  craters: CollapseCrater[] = [],
+  researchPurchased: string[] = []
 ) {
   const def = TOWERS_DATA[towerType];
   if (!def) return;
 
   const { valid, reason } = isPlacementValid(x, y, waypoints, structures, towers, craters);
+
+  const dummyTower: PlacedTower = {
+    id: 'preview',
+    typeId: towerType,
+    x,
+    y,
+    level: 1,
+    rotation: 0,
+    tiers: { path_a: 0, path_b: 0, path_c: 0 },
+    lockedPath: null,
+    targetPriority: 'first',
+    kills: 0,
+    damageDealt: 0,
+    lastFired: 0,
+    health: 100,
+    maxHealth: 100,
+    lastDamagedTime: 0,
+  };
+  const previewRange = getEffectiveTowerRange(dummyTower, researchPurchased);
 
   ctx.save();
 
@@ -758,7 +1145,7 @@ function drawPlacementGhost(
   ctx.fillStyle = valid ? 'rgba(34, 197, 94, 0.06)' : 'rgba(239, 68, 68, 0.06)';
   ctx.lineWidth = 1.5;
   ctx.beginPath();
-  ctx.arc(x, y, def.baseRange, 0, Math.PI * 2);
+  ctx.arc(x, y, previewRange, 0, Math.PI * 2);
   ctx.fill();
   ctx.stroke();
 
@@ -1298,11 +1685,16 @@ function drawTowers(
   towers: PlacedTower[],
   selectedTowerId: string | null,
   synergies: ProximitySynergy[],
-  formations: FormationAbility[]
+  formations: FormationAbility[],
+  researchPurchased: string[] = []
 ) {
   const linkedTowerIds = new Set<string>();
   synergies.forEach((s) => s.towerIds.forEach((id) => linkedTowerIds.add(id)));
   formations.forEach((f) => f.towerIds.forEach((id) => linkedTowerIds.add(id)));
+  towers.forEach((t) => {
+    if (t.linkedComboTowerId) linkedTowerIds.add(t.id);
+    if (t.comboPartnerIds && t.comboPartnerIds.length > 0) linkedTowerIds.add(t.id);
+  });
 
   const now = performance.now();
   const animTime = now * 0.003;
@@ -1344,24 +1736,62 @@ function drawTowers(
       ctx.fillStyle = 'rgba(245, 158, 11, 0.08)';
       ctx.lineWidth = 1.5;
       ctx.beginPath();
-      const range = def.baseRange + (tower.tiers.path_c > 0 ? tower.tiers.path_c * 20 : 0);
+      const range = getEffectiveTowerRange(tower, researchPurchased);
       ctx.arc(0, 0, range, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
     }
 
-    // Perch stone base
-    ctx.fillStyle = '#292524';
-    ctx.strokeStyle = isSelected ? '#F59E0B' : isLinked ? '#EAB308' : '#78716C';
-    ctx.lineWidth = isLinked ? 2.5 : 2;
-    ctx.beginPath();
-    ctx.arc(0, 0, 16, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.stroke();
+    // Perch stone base or Aerial Shadow
+    if (tower.isFlying) {
+      ctx.save();
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.35)';
+      ctx.beginPath();
+      ctx.ellipse(10, 16, 16, 9, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    } else {
+      ctx.fillStyle = '#292524';
+      ctx.strokeStyle = isSelected ? '#F59E0B' : isLinked ? '#EAB308' : '#78716C';
+      ctx.lineWidth = isLinked ? 2.5 : 2;
+      ctx.beginPath();
+      ctx.arc(0, 0, 16, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
 
     ctx.rotate(tower.rotation);
 
-    if (tower.typeId === 'bomb_bird') {
+    if (tower.typeId === 'harrier') {
+      // Sleek Harrier supersonic raptor delta-wing interceptor
+      ctx.fillStyle = '#1e293b';
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(15, 0); // nose cone
+      ctx.lineTo(-5, -15); // right wingtip
+      ctx.lineTo(-2, -4); // right wing root
+      ctx.lineTo(-12, -9); // right stabilizer
+      ctx.lineTo(-10, 0); // engine exhaust
+      ctx.lineTo(-12, 9); // left stabilizer
+      ctx.lineTo(-2, 4); // left wing root
+      ctx.lineTo(-5, 15); // left wingtip
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Cyan jet engine afterburner trail
+      ctx.fillStyle = Math.random() < 0.5 ? '#38bdf8' : '#0284c7';
+      ctx.beginPath();
+      ctx.arc(-11, 0, 3.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Golden cockpit canopy
+      ctx.fillStyle = '#f59e0b';
+      ctx.beginPath();
+      ctx.ellipse(3, 0, 5, 2.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (tower.typeId === 'bomb_bird') {
       // Custom Bomb Finch silhouette: Deep charcoal spherical body with sparking fuse
       ctx.fillStyle = '#1C1917';
       ctx.strokeStyle = '#EA580C';

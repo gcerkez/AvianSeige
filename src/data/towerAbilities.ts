@@ -105,4 +105,17 @@ export const BIRD_SPECIAL_ABILITIES: Record<TowerTypeId, BirdSpecialAbilityDef> 
     accentColor: '#F97316',
     iconName: 'sun',
   },
+  harrier: {
+    id: 'harrier_carpet_dive',
+    name: 'Supersonic Strafe Run',
+    birdTypeId: 'harrier',
+    description:
+      'Engages afterburners and executes an instantaneous supersonic strafe along its flight path, launching a barrage of homing flechettes that deal 320 damage and break all enemy armor.',
+    featherCost: 45,
+    cooldown: 11,
+    radius: 240,
+    badgeLabel: '✈️ SUPERSONIC STRAFE',
+    accentColor: '#38BDF8',
+    iconName: 'wind',
+  },
 };

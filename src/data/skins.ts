@@ -141,4 +141,22 @@ export const SKINS_DATA: TowerSkin[] = [
     tokenCost: 30,
     rarity: 'Legendary',
   },
+  {
+    id: 'skin_harrier_classic',
+    towerId: 'harrier',
+    name: 'Sky Warden Azure',
+    description: 'Aerodynamic tactical blue plumage with silver wingtip highlights.',
+    colorScheme: { primary: '#0284C7', secondary: '#0369A1', accent: '#38BDF8' },
+    tokenCost: 0,
+    rarity: 'Common',
+  },
+  {
+    id: 'skin_harrier_stealth',
+    towerId: 'harrier',
+    name: 'Night Raven Stealth',
+    description: 'Radar-absorbent matte black plumage with luminescent cyan HUD accents.',
+    colorScheme: { primary: '#0F172A', secondary: '#1E293B', accent: '#06B6D4' },
+    tokenCost: 25,
+    rarity: 'Epic',
+  },
 ];
