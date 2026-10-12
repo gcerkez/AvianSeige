@@ -584,7 +584,16 @@ export default function App() {
                 isBomb:
                   p.enemyType === 'bomber' ||
                   p.enemyType === 'iron_boar' ||
-                  p.enemyType === 'mecha_boar',
+                  p.enemyType === 'frost_hog' ||
+                  p.enemyType === 'blizzard_goliath' ||
+                  p.enemyType === 'sand_titan' ||
+                  p.enemyType === 'magma_behemoth' ||
+                  p.enemyType === 'cinder_tyrant' ||
+                  p.enemyType === 'bramble_crusher' ||
+                  p.enemyType === 'storm_king' ||
+                  p.enemyType === 'volt_ram' ||
+                  p.enemyType === 'mecha_boar' ||
+                  p.enemyType === 'emperor_pork',
                 x: p.targetX,
                 y: p.targetY,
               });
@@ -1587,6 +1596,7 @@ export default function App() {
               structures={structures}
               craters={craters}
               pathWaypoints={currentLevel.pathWaypoints}
+              regionalBiome={currentLevel.regionalBiome || 'glacial'}
               formations={activeFormations}
               synergies={activeSynergies}
               selectedTowerId={selectedTower?.id || null}

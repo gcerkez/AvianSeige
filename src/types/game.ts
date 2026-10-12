@@ -2,6 +2,29 @@ export type ElementType = 'physical' | 'fire' | 'ice' | 'electric' | 'explosive'
 
 export type MaterialType = 'wood' | 'stone' | 'metal' | 'ice' | 'explosive_barrel' | 'glass';
 
+export type RegionalBiome = 'glacial' | 'desert' | 'volcanic' | 'verdant' | 'tempest' | 'citadel';
+
+export type ObstacleType =
+  | 'standard'
+  | 'ice_spire'
+  | 'glacial_arch'
+  | 'cryo_keg'
+  | 'sandstone_pillar'
+  | 'sandstone_arch'
+  | 'dust_keg'
+  | 'obsidian_monolith'
+  | 'basalt_bridge'
+  | 'magma_pot'
+  | 'redwood_trunk'
+  | 'bramble_gate'
+  | 'pitch_keg'
+  | 'tesla_pylon'
+  | 'storm_deck'
+  | 'plasma_capacitor'
+  | 'titanium_blastdoor'
+  | 'iron_girder'
+  | 'gunpowder_magazine';
+
 export type TowerTypeId =
   | 'cardinal'
   | 'owl'
@@ -124,6 +147,7 @@ export interface StructureBlock {
   width: number;
   height: number;
   material: MaterialType;
+  obstacleType?: ObstacleType;
   health: number;
   maxHealth: number;
   mass: number;
@@ -145,10 +169,18 @@ export type EnemyArchetype =
   | 'builder'
   | 'bomber'
   | 'glider'
-  | 'iron_boar' // Boss 1
-  | 'frost_hog' // Boss 2
-  | 'storm_king' // Boss 3
-  | 'mecha_boar'; // Boss 4 (Citadel Colossus)
+  // Regional Boss Variants:
+  | 'iron_boar' // Desert Canyons / General Boss
+  | 'frost_hog' // Glacial Peaks Boss 1 (The Frost Hog)
+  | 'blizzard_goliath' // Glacial Peaks Boss 2 (Blizzard Swine Dreadnought)
+  | 'sand_titan' // Desert Canyons Boss 2 (Duststorm Colossus)
+  | 'magma_behemoth' // Volcanic Isles Boss 1 (Volcanic Pyrotank Boar)
+  | 'cinder_tyrant' // Volcanic Isles Boss 2 (Lord of Obsidian Caldera)
+  | 'bramble_crusher' // Verdant Canopy Boss (Ancient Timber Goliath)
+  | 'storm_king' // Tempest Spires Boss 1 (The Storm King)
+  | 'volt_ram' // Tempest Spires Boss 2 (Megavolt Siege Juggernaut)
+  | 'mecha_boar' // Iron Hog Citadel Boss 1 (Mecha Swine Colossus)
+  | 'emperor_pork'; // Iron Hog Citadel Boss 2 (Emperor Swine Prime)
 
 export interface Enemy {
   id: string;
@@ -229,6 +261,7 @@ export interface LevelDefinition {
   id: string;
   regionId: string;
   regionName: string;
+  regionalBiome?: RegionalBiome;
   levelNumber: number;
   name: string;
   subtitle: string;
@@ -242,6 +275,8 @@ export interface LevelDefinition {
   alternateWaypoints?: { x: number; y: number }[];
   towerSlots?: { x: number; y: number; id: string; label?: string }[];
   initialStructures: StructureBlock[];
+  regionalObstacleName?: string;
+  regionalObstacleTip?: string;
   objectives: LevelObjective[];
   bossData?: {
     type: EnemyArchetype;

@@ -9,6 +9,7 @@ import {
   ProximitySynergy,
   TowerTypeId,
   CollapseCrater,
+  RegionalBiome,
 } from '../types/game';
 import { TOWERS_DATA } from '../data/towers';
 import { physicsEngine, Particle } from '../physics/engine';
@@ -21,6 +22,7 @@ interface GameCanvasProps {
   structures: StructureBlock[];
   craters?: CollapseCrater[];
   pathWaypoints: { x: number; y: number }[];
+  regionalBiome?: RegionalBiome;
   formations: FormationAbility[];
   synergies: ProximitySynergy[];
   selectedTowerId: string | null;
@@ -107,6 +109,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   structures,
   craters = [],
   pathWaypoints,
+  regionalBiome = 'glacial',
   formations,
   synergies,
   selectedTowerId,
@@ -193,8 +196,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       ctx.save();
       ctx.translate(shakeX, shakeY);
 
-      // 1. Terrain & Winding Curvy Road
-      drawCurvyTerrain(ctx, canvas.width, canvas.height, pathWaypoints);
+      // 1. Terrain & Winding Curvy Road (Procedural Biome Aesthetic)
+      drawCurvyTerrain(ctx, canvas.width, canvas.height, pathWaypoints, regionalBiome);
 
       // 1.5 Temporary Structural Collapse Craters & Rubble Obstacles
       drawCollapseCraters(ctx, craters);
@@ -257,6 +260,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     structures,
     craters,
     pathWaypoints,
+    regionalBiome,
     formations,
     synergies,
     selectedTowerId,
@@ -285,18 +289,113 @@ function drawCurvyTerrain(
   ctx: CanvasRenderingContext2D,
   w: number,
   h: number,
-  waypoints: { x: number; y: number }[]
+  waypoints: { x: number; y: number }[],
+  biome: RegionalBiome = 'glacial'
 ) {
-  // Rich terrain backdrop
+  // Biome-specific color palettes
+  let topSky = '#1c1917';
+  let midSky = '#292524';
+  let botSky = '#1c1917';
+  let ridgeColor = '#141211';
+  let ridgeAccent = '#292524';
+  let knollColor = '#1f1c1a';
+  let roadBorder = '#3e3a37';
+  let roadInner = '#252220';
+  let roadDash = '#57534e';
+  let nestBase = '#78350F';
+  let nestBorder = '#B45309';
+  let nestText = '#F59E0B';
+
+  if (biome === 'glacial') {
+    topSky = '#081726';
+    midSky = '#0f2942';
+    botSky = '#0c1d2e';
+    ridgeColor = '#061320';
+    ridgeAccent = '#38bdf8';
+    knollColor = '#102538';
+    roadBorder = '#0284c7';
+    roadInner = '#0a1928';
+    roadDash = '#7dd3fc';
+    nestBase = '#0369a1';
+    nestBorder = '#38bdf8';
+    nestText = '#e0f2fe';
+  } else if (biome === 'desert') {
+    topSky = '#261408';
+    midSky = '#451a03';
+    botSky = '#211005';
+    ridgeColor = '#1c0c03';
+    ridgeAccent = '#b45309';
+    knollColor = '#3b1805';
+    roadBorder = '#d97706';
+    roadInner = '#281105';
+    roadDash = '#fbbf24';
+    nestBase = '#92400e';
+    nestBorder = '#d97706';
+    nestText = '#fef3c7';
+  } else if (biome === 'volcanic') {
+    topSky = '#1a0505';
+    midSky = '#2b0909';
+    botSky = '#170404';
+    ridgeColor = '#120303';
+    ridgeAccent = '#ea580c';
+    knollColor = '#240808';
+    roadBorder = '#ea580c';
+    roadInner = '#140404';
+    roadDash = '#f97316';
+    nestBase = '#7c2d12';
+    nestBorder = '#ea580c';
+    nestText = '#fed7aa';
+  } else if (biome === 'verdant') {
+    topSky = '#05170b';
+    midSky = '#0e2b15';
+    botSky = '#071c0d';
+    ridgeColor = '#031207';
+    ridgeAccent = '#16a34a';
+    knollColor = '#0b2412';
+    roadBorder = '#16a34a';
+    roadInner = '#081a0d';
+    roadDash = '#4ade80';
+    nestBase = '#14532d';
+    nestBorder = '#22c55e';
+    nestText = '#bbf7d0';
+  } else if (biome === 'tempest') {
+    topSky = '#130826';
+    midSky = '#240f42';
+    botSky = '#110724';
+    ridgeColor = '#0c041c';
+    ridgeAccent = '#9333ea';
+    knollColor = '#1e0c38';
+    roadBorder = '#7c3aed';
+    roadInner = '#0f0621';
+    roadDash = '#c084fc';
+    nestBase = '#581c87';
+    nestBorder = '#a855f7';
+    nestText = '#f3e8ff';
+  } else if (biome === 'citadel') {
+    topSky = '#18181b';
+    midSky = '#27272a';
+    botSky = '#141416';
+    ridgeColor = '#09090b';
+    ridgeAccent = '#dc2626';
+    knollColor = '#1f1f23';
+    roadBorder = '#dc2626';
+    roadInner = '#121214';
+    roadDash = '#f87171';
+    nestBase = '#7f1d1d';
+    nestBorder = '#ef4444';
+    nestText = '#fee2e2';
+  }
+
+  // 1. Terrain Backdrop Gradient
   const bgGrad = ctx.createLinearGradient(0, 0, 0, h);
-  bgGrad.addColorStop(0, '#1c1917');
-  bgGrad.addColorStop(0.5, '#292524');
-  bgGrad.addColorStop(1, '#1c1917');
+  bgGrad.addColorStop(0, topSky);
+  bgGrad.addColorStop(0.5, midSky);
+  bgGrad.addColorStop(1, botSky);
   ctx.fillStyle = bgGrad;
   ctx.fillRect(0, 0, w, h);
 
-  // Distant mountain ridge
-  ctx.fillStyle = '#141211';
+  // 2. Distant Mountain Ridge Silhouette
+  ctx.fillStyle = ridgeColor;
   ctx.beginPath();
   ctx.moveTo(0, 160);
   ctx.lineTo(140, 80);
@@ -309,8 +408,23 @@ function drawCurvyTerrain(
   ctx.lineTo(0, 0);
   ctx.fill();
 
-  // Natural terrain patches / grass knolls
-  ctx.fillStyle = '#1f1c1a';
+  // Mountain snow / lava / ridge line highlight
+  ctx.strokeStyle = ridgeAccent;
+  ctx.lineWidth = 1.5;
+  ctx.globalAlpha = 0.4;
+  ctx.beginPath();
+  ctx.moveTo(0, 160);
+  ctx.lineTo(140, 80);
+  ctx.lineTo(310, 150);
+  ctx.lineTo(470, 70);
+  ctx.lineTo(660, 140);
+  ctx.lineTo(810, 60);
+  ctx.lineTo(w, 130);
+  ctx.stroke();
+  ctx.globalAlpha = 1.0;
+
+  // 3. Biome Terrain Knolls / Mineral Patches
+  ctx.fillStyle = knollColor;
   ctx.beginPath();
   ctx.arc(200, 240, 70, 0, Math.PI * 2);
   ctx.arc(600, 340, 80, 0, Math.PI * 2);
@@ -318,9 +432,9 @@ function drawCurvyTerrain(
   ctx.fill();
 
   if (waypoints.length > 1) {
-    // Outer pathway border (Stone embankment)
+    // Outer pathway border (Stone / Ice / Basalt embankment)
     ctx.lineWidth = 50;
-    ctx.strokeStyle = '#3e3a37';
+    ctx.strokeStyle = roadBorder;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.beginPath();
@@ -330,33 +444,33 @@ function drawCurvyTerrain(
     }
     ctx.stroke();
 
-    // Inner cobblestone / dirt road
+    // Inner road bed
     ctx.lineWidth = 40;
-    ctx.strokeStyle = '#252220';
+    ctx.strokeStyle = roadInner;
     ctx.stroke();
 
     // Road texture center dashed guide
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 2.5;
     ctx.setLineDash([10, 14]);
-    ctx.strokeStyle = '#57534e';
+    ctx.strokeStyle = roadDash;
     ctx.stroke();
     ctx.setLineDash([]);
   }
 
-  // Nest destination at the terminal waypoint
+  // Avian Nest destination at the terminal waypoint
   const endPt = waypoints[waypoints.length - 1];
   if (endPt) {
     ctx.save();
-    ctx.fillStyle = '#78350F';
+    ctx.fillStyle = nestBase;
     ctx.beginPath();
     ctx.arc(endPt.x, endPt.y, 34, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = '#B45309';
+    ctx.strokeStyle = nestBorder;
     ctx.lineWidth = 2.5;
     ctx.stroke();
 
-    ctx.fillStyle = '#F59E0B';
-    ctx.font = 'bold 10px sans-serif';
+    ctx.fillStyle = nestText;
+    ctx.font = 'bold 9px sans-serif';
     ctx.textAlign = 'center';
     ctx.fillText('AVIAN NEST', endPt.x, endPt.y + 4);
     ctx.restore();
@@ -686,6 +800,8 @@ function drawPlacementGhost(
 }
 
 function drawStructures(ctx: CanvasRenderingContext2D, structures: StructureBlock[]) {
+  const animTime = performance.now() * 0.003;
+
   for (const block of structures) {
     if (block.health <= 0 && !block.isCollapsing) continue;
 
@@ -697,7 +813,82 @@ function drawStructures(ctx: CanvasRenderingContext2D, structures: StructureBloc
     const halfH = block.height / 2;
     const damageRatio = Math.max(0, 1 - block.health / block.maxHealth);
 
-    if (block.material === 'wood') {
+    // Regional Obstacle Visual Customizations
+    if (block.obstacleType === 'sandstone_pillar' || block.obstacleType === 'sandstone_arch') {
+      // Sun-baked terracotta sandstone
+      ctx.fillStyle = '#B45309';
+      ctx.strokeStyle = '#78350F';
+      ctx.lineWidth = 2;
+      ctx.fillRect(-halfW, -halfH, block.width, block.height);
+      ctx.strokeRect(-halfW, -halfH, block.width, block.height);
+
+      // Horizontal sandstone sediment strata
+      ctx.strokeStyle = '#D97706';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.moveTo(-halfW + 3, -halfH / 2);
+      ctx.lineTo(halfW - 3, -halfH / 2);
+      ctx.moveTo(-halfW + 3, 0);
+      ctx.lineTo(halfW - 3, 0);
+      ctx.moveTo(-halfW + 3, halfH / 2);
+      ctx.lineTo(halfW - 3, halfH / 2);
+      ctx.stroke();
+    } else if (block.obstacleType === 'obsidian_monolith' || block.obstacleType === 'basalt_bridge') {
+      // Jet-black glossy obsidian with molten orange fissures
+      ctx.fillStyle = '#18181B';
+      ctx.strokeStyle = '#09090B';
+      ctx.lineWidth = 2;
+      ctx.fillRect(-halfW, -halfH, block.width, block.height);
+      ctx.strokeRect(-halfW, -halfH, block.width, block.height);
+
+      // Glowing magma cracks
+      ctx.strokeStyle = '#EA580C';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(-halfW + 4, -halfH + 4);
+      ctx.lineTo(0, 0);
+      ctx.lineTo(halfW - 4, halfH - 4);
+      ctx.stroke();
+    } else if (block.obstacleType === 'tesla_pylon' || block.obstacleType === 'storm_deck') {
+      // Conductive copper Tesla pylon
+      ctx.fillStyle = '#78350F';
+      ctx.strokeStyle = '#451A03';
+      ctx.lineWidth = 2;
+      ctx.fillRect(-halfW, -halfH, block.width, block.height);
+      ctx.strokeRect(-halfW, -halfH, block.width, block.height);
+
+      // Electric spark coils
+      ctx.strokeStyle = '#38BDF8';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(-halfW + 3, -halfH + 3, block.width - 6, block.height - 6);
+
+      // Dynamic electric sparks jumping across
+      if (Math.random() < 0.25) {
+        ctx.strokeStyle = '#FACC15';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(-halfW, (Math.random() - 0.5) * halfH);
+        ctx.lineTo(halfW, (Math.random() - 0.5) * halfH);
+        ctx.stroke();
+      }
+    } else if (block.obstacleType === 'redwood_trunk') {
+      // Ancient redwood tree trunk with moss
+      ctx.fillStyle = '#78350F';
+      ctx.strokeStyle = '#451A03';
+      ctx.lineWidth = 2;
+      ctx.fillRect(-halfW, -halfH, block.width, block.height);
+      ctx.strokeRect(-halfW, -halfH, block.width, block.height);
+
+      // Tree ring grain & moss
+      ctx.strokeStyle = '#16A34A';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-halfW + 2, -halfH + 4);
+      ctx.lineTo(-halfW + 6, -halfH + 4);
+      ctx.moveTo(halfW - 6, halfH - 4);
+      ctx.lineTo(halfW - 2, halfH - 4);
+      ctx.stroke();
+    } else if (block.material === 'wood') {
       // Wood plank timber texture
       ctx.fillStyle = '#78350F';
       ctx.strokeStyle = '#451A03';
@@ -714,13 +905,6 @@ function drawStructures(ctx: CanvasRenderingContext2D, structures: StructureBloc
       ctx.moveTo(-halfW + 3, halfH / 3);
       ctx.lineTo(halfW - 3, halfH / 3);
       ctx.stroke();
-
-      // Corner nail/bolt rivets
-      ctx.fillStyle = '#B45309';
-      ctx.fillRect(-halfW + 2, -halfH + 2, 2, 2);
-      ctx.fillRect(halfW - 4, -halfH + 2, 2, 2);
-      ctx.fillRect(-halfW + 2, halfH - 4, 2, 2);
-      ctx.fillRect(halfW - 4, halfH - 4, 2, 2);
     } else if (block.material === 'stone') {
       // Granite masonry stone texture
       ctx.fillStyle = '#57534E';
@@ -732,7 +916,6 @@ function drawStructures(ctx: CanvasRenderingContext2D, structures: StructureBloc
       ctx.fillStyle = '#78716C';
       ctx.fillRect(-halfW + 3, -halfH + 3, block.width - 6, block.height - 6);
 
-      // Stone block seam
       ctx.strokeStyle = '#292524';
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -740,54 +923,89 @@ function drawStructures(ctx: CanvasRenderingContext2D, structures: StructureBloc
       ctx.lineTo(0, halfH - 2);
       ctx.stroke();
     } else if (block.material === 'metal') {
-      // Steel I-beam girder texture
+      // Steel I-beam girder / blastdoor texture
       ctx.fillStyle = '#475569';
       ctx.strokeStyle = '#0F172A';
       ctx.lineWidth = 2;
       ctx.fillRect(-halfW, -halfH, block.width, block.height);
       ctx.strokeRect(-halfW, -halfH, block.width, block.height);
 
-      // Steel highlight & rivet heads
-      ctx.fillStyle = '#64748B';
-      ctx.fillRect(-halfW + 2, -halfH + 2, block.width - 4, 3);
-      ctx.fillStyle = '#94A3B8';
-      ctx.fillRect(-halfW + 4, 0, 3, 3);
-      ctx.fillRect(halfW - 7, 0, 3, 3);
-    } else if (block.material === 'ice') {
-      // Translucent crystalline ice
-      ctx.fillStyle = 'rgba(56, 189, 248, 0.75)';
+      // Hazard chevrons if blastdoor
+      if (block.obstacleType === 'titanium_blastdoor') {
+        ctx.fillStyle = '#FACC15';
+        ctx.fillRect(-halfW + 4, -halfH + 3, 4, block.height - 6);
+        ctx.fillRect(halfW - 8, -halfH + 3, 4, block.height - 6);
+      } else {
+        ctx.fillStyle = '#64748B';
+        ctx.fillRect(-halfW + 2, -halfH + 2, block.width - 4, 3);
+      }
+    } else if (block.material === 'ice' || block.obstacleType === 'ice_spire' || block.obstacleType === 'glacial_arch') {
+      // Translucent crystalline ice with faceted refraction
+      ctx.fillStyle = 'rgba(56, 189, 248, 0.85)';
       ctx.strokeStyle = '#E0F2FE';
       ctx.lineWidth = 2;
       ctx.fillRect(-halfW, -halfH, block.width, block.height);
       ctx.strokeRect(-halfW, -halfH, block.width, block.height);
 
       // Crystal facet diagonal highlight
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
-      ctx.lineWidth = 1.2;
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 1.5;
       ctx.beginPath();
       ctx.moveTo(-halfW + 4, -halfH + 4);
       ctx.lineTo(halfW - 4, halfH - 4);
       ctx.stroke();
     } else if (block.material === 'explosive_barrel') {
-      // Dynamite TNT barrel with metal bands
-      ctx.fillStyle = '#DC2626';
-      ctx.strokeStyle = '#7F1D1D';
+      // Regional Explosive Barrels
+      let bBg = '#DC2626';
+      let bBorder = '#7F1D1D';
+      let bLabel = 'TNT';
+      let bTextColor = '#FDE047';
+
+      if (block.obstacleType === 'cryo_keg') {
+        bBg = '#0284C7';
+        bBorder = '#075985';
+        bLabel = 'CRYO';
+        bTextColor = '#E0F2FE';
+      } else if (block.obstacleType === 'dust_keg') {
+        bBg = '#D97706';
+        bBorder = '#78350F';
+        bLabel = 'DUST';
+        bTextColor = '#FEF3C7';
+      } else if (block.obstacleType === 'magma_pot') {
+        bBg = '#EA580C';
+        bBorder = '#431407';
+        bLabel = 'LAVA';
+        bTextColor = '#FFEDD5';
+      } else if (block.obstacleType === 'pitch_keg') {
+        bBg = '#78350F';
+        bBorder = '#451A03';
+        bLabel = 'PITCH';
+        bTextColor = '#FDE68A';
+      } else if (block.obstacleType === 'plasma_capacitor') {
+        bBg = '#7C3AED';
+        bBorder = '#4C1D95';
+        bLabel = 'EMP';
+        bTextColor = '#F3E8FF';
+      }
+
+      ctx.fillStyle = bBg;
+      ctx.strokeStyle = bBorder;
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.roundRect(-halfW, -halfH, block.width, block.height, 4);
       ctx.fill();
       ctx.stroke();
 
-      // Black hazard bands
+      // Hazard bands
       ctx.fillStyle = '#1C1917';
       ctx.fillRect(-halfW + 2, -halfH + 4, block.width - 4, 3);
       ctx.fillRect(-halfW + 2, halfH - 7, block.width - 4, 3);
 
-      // Glowing TNT label
-      ctx.fillStyle = '#FDE047';
-      ctx.font = 'bold 9px sans-serif';
+      // Glowing Label
+      ctx.fillStyle = bTextColor;
+      ctx.font = 'bold 8px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText('TNT', 0, 3);
+      ctx.fillText(bLabel, 0, 3);
     }
 
     // Dynamic Angry Birds Cracks & Fissures when damaged
@@ -835,6 +1053,8 @@ function drawStructures(ctx: CanvasRenderingContext2D, structures: StructureBloc
 }
 
 function drawEnemies(ctx: CanvasRenderingContext2D, enemies: Enemy[]) {
+  const animTime = performance.now() * 0.003;
+
   for (const enemy of enemies) {
     if (enemy.health <= 0) continue;
 
@@ -842,37 +1062,133 @@ function drawEnemies(ctx: CanvasRenderingContext2D, enemies: Enemy[]) {
     ctx.translate(enemy.x, enemy.y);
 
     if (enemy.isBoss) {
-      ctx.fillStyle = 'rgba(0,0,0,0.4)';
+      // Boss shadow
+      ctx.fillStyle = 'rgba(0,0,0,0.45)';
       ctx.beginPath();
-      ctx.ellipse(0, 15, enemy.radius + 8, enemy.radius / 2 + 4, 0, 0, Math.PI * 2);
+      ctx.ellipse(0, 16, enemy.radius + 10, enemy.radius / 2 + 5, 0, 0, Math.PI * 2);
       ctx.fill();
 
-      ctx.fillStyle = enemy.type === 'iron_boar' ? '#475569' : '#0284C7';
-      ctx.strokeStyle = '#1E293B';
-      ctx.lineWidth = 3;
+      // Boss Variant Palette
+      let bossColor = '#475569';
+      let bossBorder = '#1E293B';
+      let bossAccent = '#DC2626';
+
+      if (enemy.type === 'frost_hog') {
+        bossColor = '#0284C7';
+        bossBorder = '#082F49';
+        bossAccent = '#38BDF8';
+      } else if (enemy.type === 'blizzard_goliath') {
+        bossColor = '#0369A1';
+        bossBorder = '#0C4A6E';
+        bossAccent = '#7DD3FC';
+      } else if (enemy.type === 'sand_titan') {
+        bossColor = '#D97706';
+        bossBorder = '#451A03';
+        bossAccent = '#FBBF24';
+      } else if (enemy.type === 'magma_behemoth') {
+        bossColor = '#EA580C';
+        bossBorder = '#431407';
+        bossAccent = '#F97316';
+      } else if (enemy.type === 'cinder_tyrant') {
+        bossColor = '#DC2626';
+        bossBorder = '#450A0A';
+        bossAccent = '#EA580C';
+      } else if (enemy.type === 'bramble_crusher') {
+        bossColor = '#15803D';
+        bossBorder = '#14532D';
+        bossAccent = '#B45309';
+      } else if (enemy.type === 'storm_king') {
+        bossColor = '#7C3AED';
+        bossBorder = '#2E1065';
+        bossAccent = '#FACC15';
+      } else if (enemy.type === 'volt_ram') {
+        bossColor = '#9333EA';
+        bossBorder = '#3B0764';
+        bossAccent = '#38BDF8';
+      } else if (enemy.type === 'mecha_boar') {
+        bossColor = '#B91C1C';
+        bossBorder = '#0F172A';
+        bossAccent = '#F97316';
+      } else if (enemy.type === 'emperor_pork') {
+        bossColor = '#991B1B';
+        bossBorder = '#450A0A';
+        bossAccent = '#FBBF24';
+      }
+
+      // Boss Body
+      ctx.fillStyle = bossColor;
+      ctx.strokeStyle = bossBorder;
+      ctx.lineWidth = 3.5;
       ctx.beginPath();
       ctx.arc(0, 0, enemy.radius, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
 
+      // Snout
       ctx.fillStyle = '#E2E8F0';
       ctx.beginPath();
-      ctx.ellipse(8, 0, 10, 7, 0, 0, Math.PI * 2);
+      ctx.ellipse(8, 0, 11, 8, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = '#0F172A';
       ctx.fillRect(9, -3, 3, 3);
       ctx.fillRect(9, 1, 3, 3);
 
+      // Tusks
       ctx.fillStyle = '#F8FAFC';
       ctx.beginPath();
       ctx.moveTo(12, 6);
-      ctx.lineTo(20, 2);
-      ctx.lineTo(15, 9);
+      ctx.lineTo(21, 2);
+      ctx.lineTo(15, 10);
       ctx.fill();
 
+      // Boss Variant Custom Ornaments
+      if (enemy.type === 'emperor_pork') {
+        // Imperial Golden Crown
+        ctx.fillStyle = '#FBBF24';
+        ctx.strokeStyle = '#B45309';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(-12, -enemy.radius + 2);
+        ctx.lineTo(-12, -enemy.radius - 12);
+        ctx.lineTo(-5, -enemy.radius - 6);
+        ctx.lineTo(0, -enemy.radius - 14);
+        ctx.lineTo(5, -enemy.radius - 6);
+        ctx.lineTo(12, -enemy.radius - 12);
+        ctx.lineTo(12, -enemy.radius + 2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      } else if (enemy.type === 'storm_king' || enemy.type === 'volt_ram') {
+        // Lightning horns
+        ctx.strokeStyle = '#FACC15';
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.moveTo(-10, -enemy.radius + 4);
+        ctx.lineTo(-14, -enemy.radius - 8);
+        ctx.lineTo(-10, -enemy.radius - 12);
+        ctx.moveTo(10, -enemy.radius + 4);
+        ctx.lineTo(14, -enemy.radius - 8);
+        ctx.lineTo(10, -enemy.radius - 12);
+        ctx.stroke();
+      } else if (enemy.type === 'blizzard_goliath' || enemy.type === 'frost_hog') {
+        // Cryo horns
+        ctx.fillStyle = '#E0F2FE';
+        ctx.beginPath();
+        ctx.moveTo(-12, -enemy.radius + 4);
+        ctx.lineTo(-15, -enemy.radius - 10);
+        ctx.lineTo(-8, -enemy.radius + 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(12, -enemy.radius + 4);
+        ctx.lineTo(15, -enemy.radius - 10);
+        ctx.lineTo(8, -enemy.radius + 2);
+        ctx.fill();
+      }
+
+      // Frontal Boss Armor / Shield
       if (enemy.shieldFrontal > 0 && !enemy.bossShieldCracked) {
-        ctx.strokeStyle = '#DC2626';
-        ctx.lineWidth = 5;
+        ctx.strokeStyle = bossAccent;
+        ctx.lineWidth = 5.5;
         ctx.beginPath();
         ctx.arc(0, 0, enemy.radius + 6, -Math.PI / 2, Math.PI / 2);
         ctx.stroke();
@@ -880,19 +1196,20 @@ function drawEnemies(ctx: CanvasRenderingContext2D, enemies: Enemy[]) {
 
       if (enemy.isStunned) {
         ctx.fillStyle = '#FACC15';
-        ctx.font = '14px sans-serif';
+        ctx.font = 'bold 13px sans-serif';
         ctx.textAlign = 'center';
         ctx.fillText('💫 STUNNED!', 0, -enemy.radius - 18);
       }
 
+      // Boss Health Bar
       const hpPct = Math.max(0, enemy.health / enemy.maxHealth);
-      ctx.fillStyle = 'rgba(0,0,0,0.8)';
-      ctx.fillRect(-35, -enemy.radius - 12, 70, 7);
+      ctx.fillStyle = 'rgba(0,0,0,0.85)';
+      ctx.fillRect(-38, -enemy.radius - 12, 76, 8);
       ctx.fillStyle = '#EF4444';
-      ctx.fillRect(-35, -enemy.radius - 12, 70 * hpPct, 7);
+      ctx.fillRect(-38, -enemy.radius - 12, 76 * hpPct, 8);
       ctx.strokeStyle = '#FFFFFF';
       ctx.lineWidth = 1;
-      ctx.strokeRect(-35, -enemy.radius - 12, 70, 7);
+      ctx.strokeRect(-38, -enemy.radius - 12, 76, 8);
 
       ctx.fillStyle = '#F8FAFC';
       ctx.font = 'bold 9px sans-serif';
@@ -958,20 +1275,18 @@ function drawEnemies(ctx: CanvasRenderingContext2D, enemies: Enemy[]) {
       if (enemy.burningTimer > 0) {
         ctx.fillStyle = 'rgba(239, 68, 68, 0.4)';
         ctx.beginPath();
-        ctx.arc(0, 0, enemy.radius + 2, 0, Math.PI * 2);
+        ctx.arc(0, 0, enemy.radius + 3, 0, Math.PI * 2);
         ctx.fill();
       }
-      if (enemy.slowTimer > 0) {
-        ctx.strokeStyle = '#38BDF8';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(-enemy.radius - 2, -enemy.radius - 2, enemy.radius * 2 + 4, enemy.radius * 2 + 4);
-      }
 
+      // Small health bar
       const hpPct = Math.max(0, enemy.health / enemy.maxHealth);
-      ctx.fillStyle = 'rgba(0,0,0,0.7)';
-      ctx.fillRect(-enemy.radius, -enemy.radius - 7, enemy.radius * 2, 3.5);
-      ctx.fillStyle = hpPct > 0.4 ? '#22C55E' : '#EF4444';
-      ctx.fillRect(-enemy.radius, -enemy.radius - 7, enemy.radius * 2 * hpPct, 3.5);
+      if (hpPct < 1.0) {
+        ctx.fillStyle = 'rgba(0,0,0,0.7)';
+        ctx.fillRect(-12, -enemy.radius - 6, 24, 4);
+        ctx.fillStyle = '#22C55E';
+        ctx.fillRect(-12, -enemy.radius - 6, 24 * hpPct, 4);
+      }
     }
 
     ctx.restore();

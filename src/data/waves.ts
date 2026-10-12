@@ -52,15 +52,16 @@ export function generateProgressiveWaves(
     } else if (w === 20 || w === 40 || w === 60 || w === 80) {
       // Major Milestone Boss Waves
       const milestoneBoss: EnemyArchetype =
-        w === totalWaves
-          ? bossType || 'iron_boar'
+        bossType ||
+        (w === totalWaves
+          ? 'iron_boar'
           : w === 20
           ? 'iron_boar'
           : w === 40
           ? 'frost_hog'
           : w === 60
           ? 'storm_king'
-          : 'mecha_boar';
+          : 'mecha_boar');
 
       description = `MILESTONE CLIMAX: Wave ${w} Boss Assault!`;
       groups.push({ type: 'shield', count: 14 + Math.floor(w / 4), spawnInterval: 1.0, delay: 0 });

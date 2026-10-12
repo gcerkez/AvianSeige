@@ -560,15 +560,32 @@ export class PhysicsEngine {
     if (block.material === 'explosive_barrel') {
       soundManager.playExplosion();
       this.state.screenShake = 0.8;
-      this.addFloatingText(block.x + block.width / 2, block.y, 'KABOOM!', '#EF4444', 1.5);
-      const blastRadius = 140;
+
+      let blastLabel = 'KABOOM!';
+      let blastColor = '#EF4444';
+      if (block.obstacleType === 'cryo_keg') {
+        blastLabel = '❄️ CRYO FREEZE!';
+        blastColor = '#38BDF8';
+      } else if (block.obstacleType === 'dust_keg') {
+        blastLabel = '🌪️ DUST STORM!';
+        blastColor = '#D97706';
+      } else if (block.obstacleType === 'magma_pot') {
+        blastLabel = '🔥 MAGMA ERUPTION!';
+        blastColor = '#EA580C';
+      } else if (block.obstacleType === 'plasma_capacitor') {
+        blastLabel = '⚡ EMP SHOCKWAVE!';
+        blastColor = '#7C3AED';
+      }
+
+      this.addFloatingText(block.x + block.width / 2, block.y, blastLabel, blastColor, 1.6);
+      const blastRadius = 145;
 
       for (const other of structures) {
         if (other.id === block.id || other.health <= 0) continue;
         const dx = (other.x + other.width / 2) - (block.x + block.width / 2);
         const dy = (other.y + other.height / 2) - (block.y + block.height / 2);
         if (Math.hypot(dx, dy) <= blastRadius) {
-          other.health -= 250;
+          other.health -= 280;
           other.isCollapsing = true;
           other.vy = -120;
           other.vx = (dx / (Math.hypot(dx, dy) || 1)) * 140;
@@ -578,9 +595,29 @@ export class PhysicsEngine {
       for (const enemy of enemies) {
         const dist = Math.hypot(enemy.x - (block.x + block.width / 2), enemy.y - (block.y + block.height / 2));
         if (dist <= blastRadius) {
-          const dmg = 350 * (1 - dist / blastRadius);
+          const dmg = 380 * (1 - dist / blastRadius);
           enemy.health -= dmg;
-          this.addFloatingText(enemy.x, enemy.y - 20, `BLAST! -${Math.round(dmg)}`, '#F97316');
+
+          if (block.obstacleType === 'cryo_keg') {
+            enemy.slowTimer = 5.0;
+            enemy.slowMultiplier = 0.15;
+            this.addFloatingText(enemy.x, enemy.y - 25, 'FROZEN SOLID!', '#38BDF8', 1.3);
+          } else if (block.obstacleType === 'dust_keg') {
+            enemy.slowTimer = 4.0;
+            enemy.slowMultiplier = 0.45;
+            this.addFloatingText(enemy.x, enemy.y - 25, 'BLINDED!', '#D97706', 1.3);
+          } else if (block.obstacleType === 'magma_pot') {
+            enemy.burningTimer = 6.0;
+            enemy.burningDps = 75;
+            this.addFloatingText(enemy.x, enemy.y - 25, 'IGNITED!', '#EA580C', 1.3);
+          } else if (block.obstacleType === 'plasma_capacitor') {
+            enemy.conductiveTimer = 6.0;
+            enemy.isStunned = true;
+            enemy.stunTimer = 2.5;
+            this.addFloatingText(enemy.x, enemy.y - 25, 'STUNNED EMP!', '#A855F7', 1.3);
+          } else {
+            this.addFloatingText(enemy.x, enemy.y - 20, `BLAST! -${Math.round(dmg)}`, '#F97316');
+          }
         }
       }
     }
