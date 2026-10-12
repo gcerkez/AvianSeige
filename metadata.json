@@ -1,0 +1,6 @@
+{
+  "name": "Avian Siege: Physics Tower Defense",
+  "description": "A physics-driven tower defense game with destructible fortifications, dual-path upgrades, elemental synergies, and boss encounters.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

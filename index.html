@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Avian Siege: Physics Tower Defense</title>
+    <script>
+      // Defensive guard against browser extensions attempting to assign to window.fetch
+      try {
+        const _origFetch = window.fetch;
+        let _currentFetch = _origFetch;
+        Object.defineProperty(window, 'fetch', {
+          get: function() { return _currentFetch; },
+          set: function(val) { _currentFetch = val; },
+          configurable: true,
+          enumerable: true,
+        });
+      } catch (e) {
+        // Fallback: ignore
+      }
+    </script>
+    <meta name="description" content="A physics-driven tower defense game with destructible fortifications, dual-path upgrades, elemental synergies, and boss encounters." />
+    <meta property="og:title" content="Avian Siege: Physics Tower Defense" />
+    <meta property="og:description" content="A physics-driven tower defense game with destructible fortifications, dual-path upgrades, elemental synergies, and boss encounters." />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
