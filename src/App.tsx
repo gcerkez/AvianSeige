@@ -114,7 +114,9 @@ export default function App() {
   const [enemies, setEnemies] = useState<Enemy[]>([]);
   const [projectiles, setProjectiles] = useState<Projectile[]>([]);
   const [enemyProjectiles, setEnemyProjectiles] = useState<EnemyProjectile[]>([]);
-  const [structures, setStructures] = useState<StructureBlock[]>([]);
+  const [structures, setStructures] = useState<StructureBlock[]>(() =>
+    JSON.parse(JSON.stringify(CAMPAIGN_LEVELS[0].initialStructures))
+  );
   const [craters, setCraters] = useState<CollapseCrater[]>([]);
   const [activeFormations, setActiveFormations] = useState<FormationAbility[]>([]);
   const [activeSynergies, setActiveSynergies] = useState<ProximitySynergy[]>([]);
@@ -138,6 +140,41 @@ export default function App() {
   const autoWaveTimeoutRef = useRef<number | null>(null);
   const runTokenRef = useRef<number>(0);
   const pendingSpawnsRef = useRef<number>(0);
+
+  // Synchronized refs for stable simulation loop (prevents maximum update depth / re-render loops)
+  const placedTowersRef = useRef(placedTowers);
+  placedTowersRef.current = placedTowers;
+  const enemiesRef = useRef(enemies);
+  enemiesRef.current = enemies;
+  const structuresRef = useRef(structures);
+  structuresRef.current = structures;
+  const cratersRef = useRef(craters);
+  cratersRef.current = craters;
+  const isPausedRef = useRef(isPaused);
+  isPausedRef.current = isPaused;
+  const victoryModalOpenRef = useRef(victoryModalOpen);
+  victoryModalOpenRef.current = victoryModalOpen;
+  const gameSpeedRef = useRef(gameSpeed);
+  gameSpeedRef.current = gameSpeed;
+  const currentLevelRef = useRef(currentLevel);
+  currentLevelRef.current = currentLevel;
+  const isWaveActiveRef = useRef(isWaveActive);
+  isWaveActiveRef.current = isWaveActive;
+  const currentWaveIndexRef = useRef(currentWaveIndex);
+  currentWaveIndexRef.current = currentWaveIndex;
+  const isEndlessModeRef = useRef(isEndlessMode);
+  isEndlessModeRef.current = isEndlessMode;
+  const autoWaveEnabledRef = useRef(autoWaveEnabled);
+  autoWaveEnabledRef.current = autoWaveEnabled;
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+  const selectedTowerRef = useRef(selectedTower);
+  selectedTowerRef.current = selectedTower;
+  const activeSynergiesRef = useRef(activeSynergies);
+  activeSynergiesRef.current = activeSynergies;
+  const activeFormationsRef = useRef(activeFormations);
+  activeFormationsRef.current = activeFormations;
+  const handleStartWaveRef = useRef<() => void>(() => {});
 
   // Power Ups
   const [powerUps, setPowerUps] = useState<PowerUpState[]>([
@@ -225,11 +262,6 @@ export default function App() {
       combosTriggered: 0,
     });
   }, []);
-
-  // Initialize first level on mount
-  useEffect(() => {
-    initLevel(currentLevel);
-  }, [initLevel]);
 
   // Spawn a wave group of enemies with cancellable timeout tracking
   const spawnWaveData = useCallback((waveNumber: number) => {
@@ -332,6 +364,7 @@ export default function App() {
       spawnWaveData(currentWaveIndex + 1);
     }
   };
+  handleStartWaveRef.current = handleStartWave;
 
   // Main Combat Simulation Loop
   const lastTimeRef = useRef<number>(performance.now());
@@ -342,21 +375,28 @@ export default function App() {
       const rawDt = Math.min(0.1, (time - lastTimeRef.current) / 1000);
       lastTimeRef.current = time;
 
-      if (!isPaused && !victoryModalOpen) {
-        const dt = rawDt * gameSpeed;
+      if (!isPausedRef.current && !victoryModalOpenRef.current) {
+        const dt = rawDt * gameSpeedRef.current;
         const now = performance.now();
+        const currentEnemies = enemiesRef.current;
+        const currentStructures = structuresRef.current;
+        const currentTowers = placedTowersRef.current;
+        const currentLevel = currentLevelRef.current;
 
-        // 1. Update PowerUp Cooldowns & Combo Cooldowns
-        setPowerUps((prev) =>
-          prev.map((p) => ({
+        // 1. Update PowerUp Cooldowns & Combo Cooldowns (guarded to avoid redundant renders)
+        setPowerUps((prev) => {
+          if (!prev.some((p) => p.currentCooldown > 0)) return prev;
+          return prev.map((p) => ({
             ...p,
             currentCooldown: Math.max(0, p.currentCooldown - dt),
-          }))
-        );
+          }));
+        });
 
         setComboCooldowns((prev) => {
+          const keys = Object.keys(prev);
+          if (keys.length === 0 || !keys.some((k) => prev[k] > 0)) return prev;
           const updated: Record<string, number> = {};
-          for (const k in prev) {
+          for (const k of keys) {
             if (prev[k] > 0) {
               updated[k] = Math.max(0, prev[k] - dt);
             }
@@ -366,7 +406,11 @@ export default function App() {
 
         // 2. Update Structures Stability & Physics Collapses
         setStructures((prevStructures) => {
-          physicsEngine.updateStructures(prevStructures, enemies, dt, (_boss) => {
+          if (prevStructures.length === 0) return prevStructures;
+          const hasCollapsing = prevStructures.some((b) => b.isCollapsing);
+          if (!hasCollapsing) return prevStructures;
+
+          physicsEngine.updateStructures(prevStructures, currentEnemies, dt, (_boss) => {
             soundManager.playPigDefeat(true);
             setStats((s) => ({ ...s, pigsCrushed: s.pigsCrushed + 1 }));
           });
@@ -382,7 +426,7 @@ export default function App() {
             const remTime = c.remainingTime - dt;
             if (remTime > 0) {
               // Marching pigs traversing through the crater suffer slow & puncture damage
-              for (const enemy of enemies) {
+              for (const enemy of currentEnemies) {
                 if (enemy.health <= 0) continue;
                 const d = Math.hypot(enemy.x - c.x, enemy.y - c.y);
                 if (d <= c.radius) {
@@ -419,6 +463,7 @@ export default function App() {
 
         // 3. Update Enemies Movement & Statuses
         setEnemies((prevEnemies) => {
+          if (prevEnemies.length === 0) return prevEnemies;
           const updated: Enemy[] = [];
           for (const enemy of prevEnemies) {
             if (enemy.isStunned) {
@@ -497,7 +542,7 @@ export default function App() {
 
         // 4. Enemy Attack Nearby Towers with Visible Ballistic Projectiles
         const launchedEProj: EnemyProjectile[] = [];
-        for (const enemy of enemies) {
+        for (const enemy of currentEnemies) {
           if (enemy.isStunned || enemy.health <= 0) continue;
           const enemyStats = ENEMIES_DATA[enemy.type];
           if (!enemyStats) continue;
@@ -510,7 +555,7 @@ export default function App() {
             let targetTower: PlacedTower | null = null;
             let closestDist = Infinity;
 
-            for (const t of placedTowers) {
+            for (const t of currentTowers) {
               if (t.health <= 0) continue;
               const d = Math.hypot(t.x - enemy.x, t.y - enemy.y);
               if (d <= atkRange && d < closestDist) {
@@ -550,6 +595,7 @@ export default function App() {
 
         // Update Enemy Projectiles flight & impacts
         setEnemyProjectiles((prevEProj) => {
+          if (prevEProj.length === 0 && launchedEProj.length === 0) return prevEProj;
           const survivingEProj: EnemyProjectile[] = [];
           const impacts: {
             towerId: string;
@@ -636,7 +682,7 @@ export default function App() {
                   // 1. Violent screen shake effect
                   physicsEngine.state.screenShake = 0.85;
 
-                  // 2. Falling debris particles (tumbling masonry chunks, splintered timber, dust & sparks)
+                  // 2. Falling debris particles
                   physicsEngine.spawnStructuralCollapseDebris(tower.x, tower.y, {
                     primary: def?.accentColor || '#EF4444',
                     secondary: def?.silhouetteColor || '#78716C',
@@ -692,7 +738,7 @@ export default function App() {
                   };
                   setCraters((prev) => [...prev, newCrater]);
 
-                  if (selectedTower?.id === tower.id) {
+                  if (selectedTowerRef.current?.id === tower.id) {
                     setSelectedTower(null);
                   }
                   continue; // Exclude from surviving towers!
@@ -712,227 +758,180 @@ export default function App() {
         });
 
         // Progressive Repair: If 3 seconds pass without damage, slowly repair health (+45 HP/s)
-        setPlacedTowers((prevTowers) =>
-          prevTowers.map((tower) => {
-            if (now - tower.lastDamagedTime >= 3000 && tower.health < tower.maxHealth) {
-              const healedHp = Math.min(tower.maxHealth, tower.health + 45 * dt);
-              if (Math.random() < 0.12) {
-                physicsEngine.spawnParticles(
-                  tower.x + (Math.random() - 0.5) * 16,
-                  tower.y + (Math.random() - 0.5) * 16,
-                  1,
-                  '#4ADE80',
-                  25
-                );
-              }
-              return { ...tower, health: healedHp };
-            }
-            return tower;
-          })
-        );
-
-        // 5. Update Towers Targeting & Projectile Firing
-        setPlacedTowers((prevTowers) => {
-          const newProjectiles: Projectile[] = [];
-
-          const updatedTowers = prevTowers.map((tower) => {
-            const def = TOWERS_DATA[tower.typeId];
-            if (!def) return tower;
-
-            let effectiveFireRate = def.baseFireRate;
-            let effectiveRange = def.baseRange;
-            let effectiveDamage = def.baseDamage;
-            let effectiveStructuralDmg = def.baseStructuralDamage;
-            let element = def.element;
-
-            for (let i = 0; i < tower.tiers.path_a; i++) {
-              const t = def.paths.path_a.tiers[i];
-              if (t) {
-                effectiveDamage += t.damageBonus;
-                effectiveFireRate *= t.fireRateBonus;
-                effectiveRange += t.rangeBonus;
-                effectiveStructuralDmg *= t.structuralBonus;
-              }
-            }
-            for (let i = 0; i < tower.tiers.path_b; i++) {
-              const t = def.paths.path_b.tiers[i];
-              if (t) {
-                effectiveDamage += t.damageBonus;
-                effectiveFireRate *= t.fireRateBonus;
-                effectiveRange += t.rangeBonus;
-                effectiveStructuralDmg *= t.structuralBonus;
-                if (t.elementBonus) element = t.elementBonus;
-              }
-            }
-            for (let i = 0; i < tower.tiers.path_c; i++) {
-              const t = def.paths.path_c.tiers[i];
-              if (t) {
-                effectiveDamage += t.damageBonus;
-                effectiveFireRate *= t.fireRateBonus;
-                effectiveRange += t.rangeBonus;
-                effectiveStructuralDmg *= t.structuralBonus;
-              }
-            }
-
-            let target: { x: number; y: number; id?: string } | null = null;
-            const inRangeEnemies = enemies.filter((e) => Math.hypot(e.x - tower.x, e.y - tower.y) <= effectiveRange);
-
-            if (tower.targetPriority === 'structures') {
-              const inRangeStructs = structures.filter(
-                (s) => s.health > 0 && Math.hypot(s.x + s.width / 2 - tower.x, s.y + s.height / 2 - tower.y) <= effectiveRange
-              );
-              if (inRangeStructs.length > 0) {
-                const s = inRangeStructs.reduce((min, cur) => (cur.health < min.health ? cur : min), inRangeStructs[0]);
-                target = { x: s.x + s.width / 2, y: s.y + s.height / 2 };
-              }
-            }
-
-            if (!target && inRangeEnemies.length > 0) {
-              if (tower.targetPriority === 'strongest') {
-                target = inRangeEnemies.reduce((max, e) => (e.health > max.health ? e : max), inRangeEnemies[0]);
-              } else if (tower.targetPriority === 'flying') {
-                target = inRangeEnemies.find((e) => e.isFlying) || inRangeEnemies[0];
-              } else if (tower.targetPriority === 'last') {
-                target = inRangeEnemies[0];
-              } else {
-                target = inRangeEnemies[inRangeEnemies.length - 1];
-              }
-            }
-
-            if (target) {
-              tower.rotation = Math.atan2(target.y - tower.y, target.x - tower.x);
-            }
-
-            const cooldownMs = (1 / effectiveFireRate) * 1000;
-            if (target && now - tower.lastFired >= cooldownMs) {
-              tower.lastFired = now;
-              soundManager.playShoot(tower.typeId);
-
-              const speed = def.projectileSpeed;
-              const angle = tower.rotation;
-              const pVx = Math.cos(angle) * speed;
-              const pVy = Math.sin(angle) * speed;
-
-              // Check for active synergies and formations for distinctive combo visual attacks
-              let isComboProj = false;
-              let comboVis: 'volcanic' | 'thermal' | 'plasma' | 'supersonic' | undefined = undefined;
-
-              for (const s of activeSynergies) {
-                if (s.towerIds.includes(tower.id)) {
-                  isComboProj = true;
-                  if (s.abilityName?.includes('Volcanic') || s.type === 'reaction') {
-                    comboVis = 'volcanic';
-                  } else if (s.abilityName?.includes('Thermal')) {
-                    comboVis = 'thermal';
-                  } else {
-                    comboVis = 'supersonic';
-                  }
+        if (currentTowers.some((t) => now - t.lastDamagedTime >= 3000 && t.health < t.maxHealth)) {
+          setPlacedTowers((prevTowers) =>
+            prevTowers.map((tower) => {
+              if (now - tower.lastDamagedTime >= 3000 && tower.health < tower.maxHealth) {
+                const healedHp = Math.min(tower.maxHealth, tower.health + 45 * dt);
+                if (Math.random() < 0.12) {
+                  physicsEngine.spawnParticles(
+                    tower.x + (Math.random() - 0.5) * 16,
+                    tower.y + (Math.random() - 0.5) * 16,
+                    1,
+                    '#4ADE80',
+                    25
+                  );
                 }
+                return { ...tower, health: healedHp };
               }
-              for (const f of activeFormations) {
-                if (f.towerIds.includes(tower.id)) {
-                  isComboProj = true;
-                  if (f.type === 'circuit') comboVis = 'plasma';
-                  else comboVis = 'volcanic';
-                }
-              }
+              return tower;
+            })
+          );
+        }
 
-              const aoeRadius = tower.typeId === 'bomb_bird' ? 85 + tower.tiers.path_a * 15 : undefined;
+        // 5. Update Towers Targeting & Projectile Firing (in-place on currentTowers ref, no setState thrashing)
+        const newProjectiles: Projectile[] = [];
 
-              newProjectiles.push({
-                id: `proj-${now}-${Math.random()}`,
-                sourceTowerId: tower.id,
-                x: tower.x + Math.cos(angle) * 14,
-                y: tower.y + Math.sin(angle) * 14,
-                vx: pVx,
-                vy: pVy,
-                damage: effectiveDamage,
-                structuralDamage: effectiveStructuralDmg,
-                element: isComboProj && comboVis === 'volcanic' ? 'fire' : isComboProj && comboVis === 'plasma' ? 'electric' : element,
-                pierceRemaining: def.basePierce + (tower.tiers.path_a > 1 ? 2 : 0),
-                radius: def.projectileRadius,
-                maxDistance: effectiveRange * 1.25,
-                traveledDistance: 0,
-                color: isComboProj ? '#F59E0B' : def.accentColor,
-                homingTargetEnemyId: tower.typeId === 'falcon' && 'id' in target ? target.id : undefined,
-                gravity: tower.typeId === 'owl' ? 120 : tower.typeId === 'bomb_bird' ? 95 : undefined,
-                aoeRadius,
-                isComboProjectile: isComboProj,
-                comboVisual: comboVis,
-                trail: [],
-              });
+        for (const tower of currentTowers) {
+          const def = TOWERS_DATA[tower.typeId];
+          if (!def) continue;
+
+          let effectiveFireRate = def.baseFireRate;
+          let effectiveRange = def.baseRange;
+          let effectiveDamage = def.baseDamage;
+          let effectiveStructuralDmg = def.baseStructuralDamage;
+          let element = def.element;
+
+          for (let i = 0; i < tower.tiers.path_a; i++) {
+            const t = def.paths.path_a.tiers[i];
+            if (t) {
+              effectiveDamage += t.damageBonus;
+              effectiveFireRate *= t.fireRateBonus;
+              effectiveRange += t.rangeBonus;
+              effectiveStructuralDmg *= t.structuralBonus;
             }
-
-            return tower;
-          });
-
-          if (newProjectiles.length > 0) {
-            setProjectiles((prev) => [...prev, ...newProjectiles]);
+          }
+          for (let i = 0; i < tower.tiers.path_b; i++) {
+            const t = def.paths.path_b.tiers[i];
+            if (t) {
+              effectiveDamage += t.damageBonus;
+              effectiveFireRate *= t.fireRateBonus;
+              effectiveRange += t.rangeBonus;
+              effectiveStructuralDmg *= t.structuralBonus;
+              if (t.elementBonus) element = t.elementBonus;
+            }
+          }
+          for (let i = 0; i < tower.tiers.path_c; i++) {
+            const t = def.paths.path_c.tiers[i];
+            if (t) {
+              effectiveDamage += t.damageBonus;
+              effectiveFireRate *= t.fireRateBonus;
+              effectiveRange += t.rangeBonus;
+              effectiveStructuralDmg *= t.structuralBonus;
+            }
           }
 
-          return updatedTowers;
-        });
+          let target: { x: number; y: number; id?: string } | null = null;
+          const inRangeEnemies = currentEnemies.filter((e) => Math.hypot(e.x - tower.x, e.y - tower.y) <= effectiveRange);
 
-        // 6. Update Projectiles Physics Collisions
-        setProjectiles((prevProjectiles) =>
-          physicsEngine.updateProjectiles(prevProjectiles, enemies, structures, dt)
-        );
+          if (tower.targetPriority === 'structures') {
+            const inRangeStructs = currentStructures.filter(
+              (s) => s.health > 0 && Math.hypot(s.x + s.width / 2 - tower.x, s.y + s.height / 2 - tower.y) <= effectiveRange
+            );
+            if (inRangeStructs.length > 0) {
+              const s = inRangeStructs.reduce((min, cur) => (cur.health < min.health ? cur : min), inRangeStructs[0]);
+              target = { x: s.x + s.width / 2, y: s.y + s.height / 2 };
+            }
+          }
+
+          if (!target && inRangeEnemies.length > 0) {
+            if (tower.targetPriority === 'strongest') {
+              target = inRangeEnemies.reduce((max, e) => (e.health > max.health ? e : max), inRangeEnemies[0]);
+            } else if (tower.targetPriority === 'flying') {
+              target = inRangeEnemies.find((e) => e.isFlying) || inRangeEnemies[0];
+            } else if (tower.targetPriority === 'last') {
+              target = inRangeEnemies[0];
+            } else {
+              target = inRangeEnemies[inRangeEnemies.length - 1];
+            }
+          }
+
+          if (target) {
+            tower.rotation = Math.atan2(target.y - tower.y, target.x - tower.x);
+          }
+
+          const cooldownMs = (1 / effectiveFireRate) * 1000;
+          if (target && now - tower.lastFired >= cooldownMs) {
+            tower.lastFired = now;
+            soundManager.playShoot(tower.typeId);
+
+            const speed = def.projectileSpeed;
+            const angle = tower.rotation;
+            const pVx = Math.cos(angle) * speed;
+            const pVy = Math.sin(angle) * speed;
+
+            // Check for active synergies and formations for distinctive combo visual attacks
+            let isComboProj = false;
+            let comboVis: 'volcanic' | 'thermal' | 'plasma' | 'supersonic' | undefined = undefined;
+
+            for (const s of activeSynergiesRef.current) {
+              if (s.towerIds.includes(tower.id)) {
+                isComboProj = true;
+                if (s.abilityName?.includes('Volcanic') || s.type === 'reaction') {
+                  comboVis = 'volcanic';
+                } else if (s.abilityName?.includes('Thermal')) {
+                  comboVis = 'thermal';
+                } else {
+                  comboVis = 'supersonic';
+                }
+              }
+            }
+            for (const f of activeFormationsRef.current) {
+              if (f.towerIds.includes(tower.id)) {
+                isComboProj = true;
+                if (f.type === 'circuit') comboVis = 'plasma';
+                else comboVis = 'volcanic';
+              }
+            }
+
+            const aoeRadius = tower.typeId === 'bomb_bird' ? 85 + tower.tiers.path_a * 15 : undefined;
+
+            newProjectiles.push({
+              id: `proj-${now}-${Math.random()}`,
+              sourceTowerId: tower.id,
+              x: tower.x + Math.cos(angle) * 14,
+              y: tower.y + Math.sin(angle) * 14,
+              vx: pVx,
+              vy: pVy,
+              damage: effectiveDamage,
+              structuralDamage: effectiveStructuralDmg,
+              element: isComboProj && comboVis === 'volcanic' ? 'fire' : isComboProj && comboVis === 'plasma' ? 'electric' : element,
+              pierceRemaining: def.basePierce + (tower.tiers.path_a > 1 ? 2 : 0),
+              radius: def.projectileRadius,
+              maxDistance: effectiveRange * 1.25,
+              traveledDistance: 0,
+              color: isComboProj ? '#F59E0B' : def.accentColor,
+              homingTargetEnemyId: tower.typeId === 'falcon' && 'id' in target ? target.id : undefined,
+              gravity: tower.typeId === 'owl' ? 120 : tower.typeId === 'bomb_bird' ? 95 : undefined,
+              aoeRadius,
+              isComboProjectile: isComboProj,
+              comboVisual: comboVis,
+              trail: [],
+            });
+          }
+        }
+
+        if (newProjectiles.length > 0) {
+          setProjectiles((prev) => [...prev, ...newProjectiles]);
+        }
+
+        // 6. Update Projectiles Physics Collisions (guarded)
+        setProjectiles((prevProjectiles) => {
+          if (prevProjectiles.length === 0) return prevProjectiles;
+          return physicsEngine.updateProjectiles(prevProjectiles, currentEnemies, currentStructures, dt);
+        });
 
         // 7. Update Visual Particles and Floaters
         physicsEngine.updateVisuals(dt);
 
-        // 7.5 Update Collapse Craters & Rubble Obstacle Slowdown on Marching Enemies
-        setCraters((prevCraters) => {
-          if (prevCraters.length === 0) return prevCraters;
-          const nextCraters: CollapseCrater[] = [];
-
-          for (const crater of prevCraters) {
-            const rem = crater.remainingTime - dt;
-            if (rem > 0) {
-              crater.remainingTime = rem;
-              crater.smokeTimer = (crater.smokeTimer || 0) + dt;
-              if (crater.smokeTimer >= 0.45) {
-                crater.smokeTimer = 0;
-                physicsEngine.spawnParticles(
-                  crater.x + (Math.random() - 0.5) * (crater.radius * 0.9),
-                  crater.y + (Math.random() - 0.5) * (crater.radius * 0.7),
-                  2,
-                  'rgba(120, 113, 108, 0.45)',
-                  25,
-                  -20
-                );
-              }
-
-              // Rubble obstacle effect: Slows down marching ground pigs traversing the crater
-              for (const enemy of enemies) {
-                if (enemy.isFlying || enemy.health <= 0) continue;
-                const d = Math.hypot(enemy.x - crater.x, enemy.y - crater.y);
-                if (d <= crater.radius + 6) {
-                  enemy.speed = Math.max(10, enemy.baseSpeed * 0.52);
-                  if (Math.random() < 0.05) {
-                    physicsEngine.spawnParticles(enemy.x, enemy.y, 1, '#78716C', 35, 180);
-                  }
-                }
-              }
-
-              nextCraters.push(crater);
-            } else {
-              physicsEngine.addFloatingText(crater.x, crater.y - 12, 'RUBBLE CLEARED', '#A8A29E', 1.0);
-              physicsEngine.spawnParticles(crater.x, crater.y, 8, '#78716C', 60, 150);
-            }
-          }
-
-          return nextCraters;
-        });
-
         // 8. Check Wave Completion (only when all queued spawns are deployed and all enemies defeated)
-        if (isWaveActive && pendingSpawnsRef.current === 0 && enemies.length === 0) {
+        if (isWaveActiveRef.current && pendingSpawnsRef.current === 0 && enemiesRef.current.length === 0) {
           setIsWaveActive(false);
           setActiveWavesCount(0);
-          const nextWave = currentWaveIndex + 1;
-          const targetMilestone = currentLevel.milestoneWaveCount || 40;
+          const nextWave = currentWaveIndexRef.current + 1;
+          const targetMilestone = currentLevelRef.current.milestoneWaveCount || 40;
 
-          if (!isEndlessMode && nextWave > targetMilestone) {
+          if (!isEndlessModeRef.current && nextWave > targetMilestone) {
             soundManager.playVictory();
             setIsVictory(true);
             setVictoryModalOpen(true);
@@ -943,19 +942,19 @@ export default function App() {
               shards: p.shards + 10,
               completedLevels: {
                 ...p.completedLevels,
-                [currentLevel.id]: {
+                [currentLevelRef.current.id]: {
                   stars: 3,
-                  highestDifficulty: settings.difficulty,
+                  highestDifficulty: settingsRef.current.difficulty,
                 },
               },
             }));
           } else {
             setCurrentWaveIndex(nextWave);
             // Automatic wave progression with tracked cancellable timeout
-            if (autoWaveEnabled) {
+            if (autoWaveEnabledRef.current) {
               if (autoWaveTimeoutRef.current) clearTimeout(autoWaveTimeoutRef.current);
               autoWaveTimeoutRef.current = window.setTimeout(() => {
-                handleStartWave();
+                handleStartWaveRef.current();
               }, 1200);
             }
           }
@@ -967,21 +966,7 @@ export default function App() {
 
     animId = requestAnimationFrame(gameLoop);
     return () => cancelAnimationFrame(animId);
-  }, [
-    isPaused,
-    victoryModalOpen,
-    gameSpeed,
-    enemies,
-    structures,
-    currentLevel,
-    isWaveActive,
-    currentWaveIndex,
-    isEndlessMode,
-    autoWaveEnabled,
-    settings,
-    spawnWaveData,
-    selectedTower,
-  ]);
+  }, []);
 
   // Synergies and Formations recalculation
   useEffect(() => {
